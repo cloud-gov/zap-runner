@@ -1,0 +1,58 @@
+resources:
+  - name: repo
+    type: git
+    source:
+      uri: ((git-uri))
+      branch: ((branch))
+      private_key: ((deploy-key))
+
+  - name: runner-image
+    type: registry-image
+    source:
+      repository: <aws_account_id>.dkr.ecr.<region>.amazonaws.com/zap-runner
+      tag: ((runner-tag))
+
+  - name: zap-report-archive
+    type: s3
+    source:
+      bucket: ((report-bucket))
+      region: ((aws-region))
+      access_key_id: ((aws-access-key))
+      secret_access_key: ((aws-secret-key))
+      versioned_file: zap/((branch))/report.json
+      server_side_encryption: AES256
+      acl: private
+      content_type: application/json
+      disable_ssl: false
+
+jobs:
+  - name: set-self
+    plan:
+      - get: repo
+        trigger: true
+      - set_pipeline: self
+        file: repo/ci/pipeline.yml
+        var_files:
+          - repo/ci/config.yml
+
+  - name: scan-staging
+    plan:
+      - get: repo
+        passed:
+          - set-self
+      - get: runner-image
+      - task: zap-scan
+        file: repo/ci/tasks/zap-scan.yml
+      - put: zap-report-archive
+        params:
+          file: zap-report/report.json
+    on_failure:
+      put: slack-alert
+      params:
+        text: ":red_circle: ZAP scan failed on ((branch))"
+
+groups:
+  - name: default
+    jobs:
+      - set-self
+      - scan-staging
