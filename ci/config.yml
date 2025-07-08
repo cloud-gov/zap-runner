@@ -1,0 +1,29 @@
+# Inherit common-pipelines defaults
+image-repository: ((image-repository))
+oci-build-params: ((oci-build-params))
+
+# Repo & branch (for any self-setting jobs)
+src-repo: ((src-repo))
+src-target-branch: ((src-target-branch))
+
+# Scan configuration remains the same:
+target-url: ((target-url))
+scan-mode: ((scan-mode))
+
+credentials:
+  internal:
+    client_id: ((credentials.internal.client_id))
+    client_secret: ((credentials.internal.client_secret))
+    token_uri: ((credentials.internal.token_uri))
+  external:
+    client_id: ((credentials.external.client_id))
+    client_secret: ((credentials.external.client_secret))
+    token_uri: ((credentials.external.token_uri))
+  pages:
+    client_id: ((credentials.pages.client_id))
+    client_secret: ((credentials.pages.client_secret))
+    token_uri: ((credentials.pages.token_uri))
+  unauthenticated:
+    client_id: ""
+    client_secret: ""
+    token_uri: ""

@@ -1,0 +1,51 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/concourse/concourse/master/ci/schemas/task.json
+platform: linux
+
+image_resource:
+  type: registry-image
+  source:
+    repository: <aws_id>.dkr.ecr.<region>.amazonaws.com/zap-runner
+    tag: ((runner-tag))
+
+inputs:
+  - name: contexts
+
+outputs:
+  - name: zap-report
+
+params:
+  SCAN_MODE: ((scan-mode))
+  TARGET_URL: ((target-url))
+  CREDHB_CRED: ((credentials.$SCAN_MODE))
+
+run:
+  path: bash
+  args:
+    - -ceu
+    - |
+      echo "Starting scan in mode: $SCAN_MODE"
+      CONTEXT_FILE="contexts/${SCAN_MODE}.context"
+      if [[ ! -f "$CONTEXT_FILE" ]]; then
+        echo "ERROR: context file not found: $CONTEXT_FILE" >&2
+        exit 1
+      fi
+
+      # (Re-use existing auth logic)
+      auth_header=""
+      if [[ "$SCAN_MODE" != "unauthenticated" ]]; then
+        client_id=$(jq -r .client_id <<<"$CREDHB_CRED")
+        client_secret=$(jq -r .client_secret <<<"$CREDHB_CRED")
+        token_uri=$(jq -r .token_uri <<<"$CREDHB_CRED")
+        token=$(curl -s -u "$client_id:$client_secret" -d 'grant_type=client_credentials' "$token_uri" | jq -r .access_token)
+        auth_header="-authheader \"Authorization: Bearer $token\""
+      fi
+
+      echo "Using context: $CONTEXT_FILE"
+      zap.sh -cmd \
+        -context "$CONTEXT_FILE" \
+        -quickurl "$TARGET_URL" \
+        $auth_header \
+        -r zap-report/report.html \
+        -J zap-report/report.json
+
+      echo "Scan complete, reports in zap-report/"
