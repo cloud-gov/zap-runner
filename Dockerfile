@@ -23,21 +23,21 @@ RUN if [ "${ENABLE_ADDON_UPDATE}" = "true" ]; then \
 # STAGE 2 — FINAL IMAGE: your hardened Ubuntu base (no STIG steps needed here)
 ################################################################################
 FROM ${base_image}
-
 USER root
 WORKDIR /zap
 ARG DEBIAN_FRONTEND=noninteractive
 
-# Copy ZAP tree from builder
+# Copy ZAP from builder
 COPY --from=zap-builder /zap /zap
 
-# Install only what we need at runtime (curl/jq for scripts, Python API client)
+# Install runtime tools, API client, then harden only under /zap
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     curl jq python3-pip && \
     pip3 install --no-cache-dir zaproxy && \
-    # Hardening: strip any remaining setuid/setgid bits
-    find / -perm /6000 -type f -exec chmod a-s {} + && \
+    # Harden: strip setuid/setgid only in /zap, ignore /proc, /sys, etc.
+    find /zap -xdev -perm /6000 -type f -exec chmod a-s {} + 2>/dev/null && \
+    # Clean up
     apt-get purge -y curl jq && \
     apt-get autoremove -y && \
     rm -rf /var/lib/apt/lists/* /usr/share/doc /usr/share/man
