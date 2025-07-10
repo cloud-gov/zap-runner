@@ -1,10 +1,6 @@
-# Inherit common-pipelines defaults
-image-repository: ((image-repository))
-oci-build-params: ((oci-build-params))
-
-# Repo & branch (for any self-setting jobs)
-src-repo: ((src-repo))
-src-target-branch: ((src-target-branch))
+---
+# Repository everything is hosted in
+repo_name: zap-runner
 
 # Scan configuration remains the same:
 target-url: ((target-url))

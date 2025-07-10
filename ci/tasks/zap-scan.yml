@@ -1,10 +1,10 @@
-# yaml-language-server: $schema=https://raw.githubusercontent.com/concourse/concourse/master/ci/schemas/task.json
+---
 platform: linux
 
 image_resource:
   type: registry-image
   source:
-    repository: <aws_id>.dkr.ecr.<region>.amazonaws.com/zap-runner
+    repository: ((repo_name))
     tag: ((runner-tag))
 
 inputs:

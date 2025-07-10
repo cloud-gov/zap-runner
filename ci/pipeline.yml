@@ -1,58 +1,114 @@
-resources:
-  - name: repo
-    type: git
-    source:
-      uri: ((git-uri))
-      branch: ((branch))
-      private_key: ((deploy-key))
-
-  - name: runner-image
-    type: registry-image
-    source:
-      repository: <aws_account_id>.dkr.ecr.<region>.amazonaws.com/zap-runner
-      tag: ((runner-tag))
-
-  - name: zap-report-archive
-    type: s3
-    source:
-      bucket: ((report-bucket))
-      region: ((aws-region))
-      access_key_id: ((aws-access-key))
-      secret_access_key: ((aws-secret-key))
-      versioned_file: zap/((branch))/report.json
-      server_side_encryption: AES256
-      acl: private
-      content_type: application/json
-      disable_ssl: false
-
+---
 jobs:
   - name: set-self
     plan:
-      - get: repo
+      - get: ((repo_name))
         trigger: true
-      - set_pipeline: self
-        file: repo/ci/pipeline.yml
-        var_files:
-          - repo/ci/config.yml
+      - set_pipeline:
+          file: ((repo_name))/ci/pipeline.yml
+          var_files:
+            - ((repo_name))/ci/config.yml
 
-  - name: scan-staging
+  - name: scan-all-contexts
     plan:
-      - get: repo
-        passed:
-          - set-self
-      - get: runner-image
-      - task: zap-scan
-        file: repo/ci/tasks/zap-scan.yml
+      - get: ((repo_name))
+        trigger: true
+      - across:
+          - var: mode
+            values: ["unauthenticated"]
+
+        #   values: ["internal", "external", "pages", "app", "unauthenticated"]
+        max_in_flight: all
+        fail_fast: false
+        do:
+          - task: zap-scan-((.:mode))
+            file: ((repo_name))/ci/tasks/zap-scan.yml
+            params:
+              SCAN_MODE: ((.:mode))
+              TARGET_URL: ((target-url))
+            inputs:
+              - name: contexts
+              - name: ((repo_name))
+            outputs:
+              - name: zap-report-((.:mode))
+            run:
+              path: bash
+              args:
+                - -ceu
+                - |
+                  echo "Starting scan in mode: $SCAN_MODE"
+                  CONTEXT_FILE="contexts/${SCAN_MODE}.context"
+                  if [[ ! -f "$CONTEXT_FILE" ]]; then
+                    echo "ERROR: context file not found: $CONTEXT_FILE" >&2
+                    exit 1
+                  fi
+
+                  auth_header=""
+                  if [[ "$SCAN_MODE" != "unauthenticated" ]]; then
+                    client_id=$(jq -r .client_id <<<"$CREDHB_CRED")
+                    client_secret=$(jq -r .client_secret <<<"$CREDHB_CRED")
+                    token_uri=$(jq -r .token_uri <<<"$CREDHB_CRED")
+                    token=$(curl -s -u "$client_id:$client_secret" \
+                            -d 'grant_type=client_credentials' \
+                            "$token_uri" | jq -r .access_token)
+                    auth_header="-authheader \"Authorization: Bearer $token\""
+                  fi
+
+                  echo "Using context: $CONTEXT_FILE"
+                  zap.sh -cmd \
+                    -context "$CONTEXT_FILE" \
+                    -quickurl "$TARGET_URL" \
+                    $auth_header \
+                    -r zap-report-((.:mode)).html \
+                    -J zap-report-((.:mode)).json
+
       - put: zap-report-archive
         params:
-          file: zap-report/report.json
-    on_failure:
-      put: slack-alert
-      params:
-        text: ":red_circle: ZAP scan failed on ((branch))"
+          file: zap-report-*/report.json
 
 groups:
   - name: default
     jobs:
       - set-self
-      - scan-staging
+      - scan-all-contexts
+
+resources:
+  - name: ((repo_name))
+    type: git
+    source:
+      uri: https://github.com/cloud-gov/((repo_name))
+      branch: main
+      commit_verification_keys: ((cloud-gov-pgp-keys))
+
+  - name: daily
+    type: time
+    source:
+      interval: 12h
+
+resource_types:
+  - name: registry-image
+    type: registry-image
+    source:
+      aws_access_key_id: ((ecr_aws_key))
+      aws_secret_access_key: ((ecr_aws_secret))
+      repository: registry-image-resource
+      aws_region: us-gov-west-1
+      tag: latest
+
+  - name: git
+    type: registry-image
+    source:
+      aws_access_key_id: ((ecr_aws_key))
+      aws_secret_access_key: ((ecr_aws_secret))
+      repository: git-resource
+      aws_region: us-gov-west-1
+      tag: latest
+
+  - name: time
+    type: registry-image
+    source:
+      aws_access_key_id: ((ecr_aws_key))
+      aws_secret_access_key: ((ecr_aws_secret))
+      repository: time-resource
+      aws_region: us-gov-west-1
+      tag: latest
