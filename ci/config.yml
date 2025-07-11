@@ -1,7 +1,7 @@
 # ci/config.yml
 ---
 repo_name: zap-runner
-runner-tag: "latest" # Docker image tag for zap-runner
+runner_tag: "latest" # Docker image tag for zap-runner
 
 credentials:
   internal:
