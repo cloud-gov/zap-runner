@@ -9,7 +9,7 @@ jobs:
       - set_pipeline: zap-scanner
         file: ((repo_name))/ci/pipeline.yml
         var_files:
-          - ((repo_name))/ci/config.yml
+          - ci/config.yml
 
   - name: scan-all-contexts
     plan:
