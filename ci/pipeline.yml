@@ -29,6 +29,8 @@ jobs:
             params:
               SCAN_MODE: ((.:mode))
               CREDHB_CRED: ((credentials.$SCAN_MODE))
+              repo_name: ((repo_name))
+              runner_tag: ((runner_tag))
 
 groups:
   - name: default
