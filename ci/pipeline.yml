@@ -1,15 +1,14 @@
-# ci/pipeline.yml
 ---
 jobs:
   - name: set-self
     plan:
-      - get: ((repo_name))
+      - get: zap-runner
         trigger: true
 
       - set_pipeline: zap-scanner
-        file: ((repo_name))/ci/pipeline.yml
+        file: zap-runner/ci/pipeline.yml
         var_files:
-          - ((repo_name))/ci/config.yml
+          - zap-runner/ci/config.yml
 
   - name: scan-all-contexts
     plan:
@@ -21,10 +20,9 @@ jobs:
         passed: [set-self]
 
       - across:
-          - var: mode
-            # will loop 4 contexts, but scan only those URLs present
+          - var: context
             values: ["internal", "external", "pages", "unauthenticated"]
-        max_in_flight: all
+        limit: all
         fail_fast: false
         do:
           - task: zap-scan
@@ -33,8 +31,8 @@ jobs:
               repo_name: ((repo_name))
               runner_tag: ((runner_tag))
             params:
-              SCAN_MODE: ((.:mode))
-              CREDHB_CRED: ((credentials.$SCAN_MODE))
+              TARGET_CONTEXT: ((.:context))
+              CREDHB_CRED: ((credentials))
 
 groups:
   - name: default
@@ -43,26 +41,20 @@ groups:
       - scan-all-contexts
 
 resources:
+  - name: zap-config
+    type: git
+    source:
+      uri: https://github.com/cloud-gov/zap-runner.git
+      branch: main
+      paths:
+        - ci/zap-config/**
+
   - name: zap-runner
     type: git
     source:
       uri: https://github.com/cloud-gov/((repo_name))
       branch: main
       commit_verification_keys: ((cloud-gov-pgp-keys))
-      ignore_paths: ["Dockerfile"]
-
-  - name: zap-config
-    type: git
-    source:
-      uri: https://github.com/cloud-gov/zap-runner
-      branch: main
-      paths:
-        - ci/zap-config/**
-
-#  - name: daily
-#    type: time
-#    source:
-#      interval: 12h
 
 resource_types:
   - name: registry-image

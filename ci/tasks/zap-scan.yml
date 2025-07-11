@@ -11,15 +11,15 @@ image_resource:
     tag: ((runner_tag))
 
 inputs:
-  - name: zap-config
+  - name: zap-config # contains ci/zap-config/urls.csv & zap.yaml
   - name: ((repo_name))
 
 outputs:
   - name: zap-report
 
 params:
-  SCAN_MODE:
-  CREDHB_CRED:
+  TARGET_CONTEXT: # one of internal, external, pages, unauthenticated
+  CREDHB_CRED: # JSON with all context credentials
   repo_name:
   runner_tag:
 
@@ -30,47 +30,42 @@ run:
     - |
       #!/usr/bin/env bash
 
-      echo "Scanning all URLs in context '${SCAN_MODE}' as a single batch"
+      echo "Starting DAST for context '${TARGET_CONTEXT}'"
 
-      # 1) Extract credentials
-      CLIENT_ID=$(jq -r .client_id <<<"$CREDHB_CRED")
-      CLIENT_SECRET=$(jq -r .client_secret <<<"$CREDHB_CRED")
-      TOKEN_URI=$(jq -r .token_uri <<<"$CREDHB_CRED")
+      CREDS_JSON="$CREDHB_CRED"
 
-      # 2) Gather URLs for this context
       mapfile -t URLS < <(
-        tail -n +2 zap-config/urls.csv | \
-        awk -F',' -v ctx="$SCAN_MODE" '$1==ctx { print $2 }'
+        tail -n +2 ci/zap-config/urls.csv | \
+        awk -F',' -v ctx="$TARGET_CONTEXT" '$1==ctx {print $2}'
       )
 
       if [ ${#URLS[@]} -eq 0 ]; then
-        echo "No URLs for context '$SCAN_MODE', skipping."
+        echo "No URLs for context '$TARGET_CONTEXT', skipping."
         exit 0
       fi
 
-      echo "URLs to scan: ${URLS[*]}"
+      CLIENT_ID=$(jq -r --arg ctx "$TARGET_CONTEXT" '.[$ctx].client_id' <<<"$CREDS_JSON")
+      CLIENT_SECRET=$(jq -r --arg ctx "$TARGET_CONTEXT" '.[$ctx].client_secret' <<<"$CREDS_JSON")
+      TOKEN_URI=$(jq -r --arg ctx "$TARGET_CONTEXT" '.[$ctx].token_uri' <<<"$CREDS_JSON")
 
-      # 3) Build zap-baseline.py target flags
-      TARGET_ARGS=()
-      for url in "${URLS[@]}"; do
-        TARGET_ARGS+=( -t "$url" )
-      done
-
-      # 4) Create output directory
       mkdir -p zap-report
 
-      # 5) Define output files
-      HTML_OUT="zap-report/${SCAN_MODE}.html"
-      JSON_OUT="zap-report/${SCAN_MODE}.json"
-      XML_OUT="zap-report/${SCAN_MODE}.xml"
+      for url in "${URLS[@]}"; do
+        host=$(echo "$url" | sed -E 's#https?://##;s#/.*##')
+        HTML_OUT="zap-report/${TARGET_CONTEXT}-${host}.html"
+        JSON_OUT="zap-report/${TARGET_CONTEXT}-${host}.json"
+        XML_OUT="zap-report/${TARGET_CONTEXT}-${host}.xml"
 
-      # 6) Run ZAP baseline with HTML, JSON, and XML outputs
-      zap-baseline.py \
-        "${TARGET_ARGS[@]}" \
-        -c zap-config/zap.yaml \
-        -r "$HTML_OUT" \
-        -J "$JSON_OUT" \
-        -x "$XML_OUT" \
-        -t "${CLIENT_ID}:${CLIENT_SECRET}:${TOKEN_URI}"
+        echo "→ Scanning $url"
+        zap-baseline.py \
+          -t "$url" \
+          -c ci/zap-config/zap.yaml \
+          -r "$HTML_OUT" \
+          -J "$JSON_OUT" \
+          -x "$XML_OUT" \
+          -t "${CLIENT_ID}:${CLIENT_SECRET}:${TOKEN_URI}"
 
-      echo "Context scan '${SCAN_MODE}' complete: $HTML_OUT, $JSON_OUT, $XML_OUT"
+        echo "  Reports: $HTML_OUT, $JSON_OUT, $XML_OUT"
+      done
+
+      echo "Context '$TARGET_CONTEXT' scans complete."
