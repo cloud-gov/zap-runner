@@ -1,4 +1,3 @@
----
 platform: linux
 
 image_resource:
@@ -11,7 +10,7 @@ image_resource:
     tag: ((runner_tag))
 
 inputs:
-  - name: zap-config # contains ci/zap-config/urls.csv & zap.yaml
+  - name: zap-config # contains zap-config/urls.csv & zap-config/zap.yaml
   - name: ((repo_name))
 
 outputs:
@@ -32,8 +31,9 @@ run:
 
       CREDS_JSON="$CREDHB_CRED"
 
+      # Filter URLs for this context
       mapfile -t URLS < <(
-        tail -n +2 ci/zap-config/urls.csv | \
+        tail -n +2 zap-config/urls.csv | \
         awk -F',' -v ctx="$TARGET_CONTEXT" '$1==ctx { print $2 }'
       )
 
@@ -67,7 +67,7 @@ run:
 
         zap-baseline.py \
           -t "$url" \
-          -c ci/zap-config/zap.yaml \
+          -c zap-config/zap.yaml \
           -r "$HTML_OUT" \
           -J "$JSON_OUT" \
           -x "$XML_OUT" \
