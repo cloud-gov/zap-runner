@@ -1,21 +1,21 @@
 # ci/config.yml
 ---
 repo_name: zap-runner
-runner_tag: "latest" # Docker image tag for zap-runner
+runner_tag: "latest"
 
 credentials:
   internal:
-    client_id: ((credentials.internal.client_id))
-    client_secret: ((credentials.internal.client_secret))
-    token_uri: ((credentials.internal.token_uri))
+    client_id: ((credentials.internal.client_id?))
+    client_secret: ((credentials.internal.client_secret?))
+    token_uri: ((credentials.internal.token_uri?))
   external:
-    client_id: ((credentials.external.client_id))
-    client_secret: ((credentials.external.client_secret))
-    token_uri: ((credentials.external.token_uri))
+    client_id: ((credentials.external.client_id?))
+    client_secret: ((credentials.external.client_secret?))
+    token_uri: ((credentials.external.token_uri?))
   pages:
-    client_id: ((credentials.pages.client_id))
-    client_secret: ((credentials.pages.client_secret))
-    token_uri: ((credentials.pages.token_uri))
+    client_id: ((credentials.pages.client_id?))
+    client_secret: ((credentials.pages.client_secret?))
+    token_uri: ((credentials.pages.token_uri?))
   unauthenticated:
     client_id: ""
     client_secret: ""
