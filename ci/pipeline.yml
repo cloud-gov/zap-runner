@@ -44,7 +44,7 @@ resources:
   - name: zap-config
     type: git
     source:
-      uri: https://github.com/cloud-gov/zap-runner.git
+      uri: https://github.com/cloud-gov/zap-runner
       branch: main
       paths:
         - ci/zap-config/**
