@@ -21,6 +21,8 @@ outputs:
 params:
   SCAN_MODE:
   CREDHB_CRED:
+  repo_name:
+  runner_tag:
 
 run:
   path: bash
