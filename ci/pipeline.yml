@@ -47,7 +47,7 @@ resources:
       uri: https://github.com/cloud-gov/((repo_name))
       branch: main
       commit_verification_keys: ((cloud-gov-pgp-keys))
-      ignore_paths: [Dockerfile]
+      ignore_paths: ["Dockerfile"]
 
 #  - name: daily
 #    type: time
