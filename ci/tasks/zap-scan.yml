@@ -32,7 +32,6 @@ run:
 
       CREDS_JSON="$CREDHB_CRED"
 
-      # Filter URLs for this context
       mapfile -t URLS < <(
         tail -n +2 ci/zap-config/urls.csv | \
         awk -F',' -v ctx="$TARGET_CONTEXT" '$1==ctx { print $2 }'
@@ -43,10 +42,10 @@ run:
         exit 0
       fi
 
-      # Extract credentials for this context
-      CLIENT_ID=$(jq -r --arg ctx "$TARGET_CONTEXT" '.[$ctx].client_id' <<<"$CREDS_JSON")
-      CLIENT_SECRET=$(jq -r --arg ctx "$TARGET_CONTEXT" '.[$ctx].client_secret' <<<"$CREDS_JSON")
-      TOKEN_URI=$(jq -r --arg ctx "$TARGET_CONTEXT" '.[$ctx].token_uri' <<<"$CREDS_JSON")
+      # Extract credentials for this context (may be empty)
+      CLIENT_ID=$(jq -r --arg ctx "$TARGET_CONTEXT" '.[$ctx].client_id // empty' <<<"$CREDS_JSON")
+      CLIENT_SECRET=$(jq -r --arg ctx "$TARGET_CONTEXT" '.[$ctx].client_secret // empty' <<<"$CREDS_JSON")
+      TOKEN_URI=$(jq -r --arg ctx "$TARGET_CONTEXT" '.[$ctx].token_uri // empty' <<<"$CREDS_JSON")
 
       mkdir -p zap-report
 
@@ -57,13 +56,22 @@ run:
         XML_OUT="zap-report/${TARGET_CONTEXT}-${host}.xml"
 
         echo "→ Scanning $url"
+
+        # Build auth args only if all credentials present
+        AUTH_ARGS=()
+        if [[ -n "$CLIENT_ID" && -n "$CLIENT_SECRET" && -n "$TOKEN_URI" ]]; then
+          AUTH_ARGS+=( -t "${CLIENT_ID}:${CLIENT_SECRET}:${TOKEN_URI}" )
+        else
+          echo "Warning: missing credentials for context '$TARGET_CONTEXT'; proceeding without auth."
+        fi
+
         zap-baseline.py \
           -t "$url" \
           -c ci/zap-config/zap.yaml \
           -r "$HTML_OUT" \
           -J "$JSON_OUT" \
           -x "$XML_OUT" \
-          -t "${CLIENT_ID}:${CLIENT_SECRET}:${TOKEN_URI}"
+          "${AUTH_ARGS[@]}"
 
         echo "  Reports: $HTML_OUT, $JSON_OUT, $XML_OUT"
       done
