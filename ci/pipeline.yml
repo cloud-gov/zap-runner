@@ -6,7 +6,7 @@ jobs:
       - get: ((repo_name))
         trigger: true
 
-      - set_pipeline: ((repo_name))
+      - set_pipeline: zap-scanner
         file: ((repo_name))/ci/pipeline.yml
         var_files:
           - ((repo_name))/ci/config.yml
