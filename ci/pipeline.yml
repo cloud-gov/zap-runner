@@ -26,45 +26,7 @@ jobs:
             params:
               SCAN_MODE: ((.:mode))
               TARGET_URL: ((target-url))
-            inputs:
-              - name: contexts
-              - name: ((repo_name))
-            outputs:
-              - name: zap-report-((.:mode))
-            run:
-              path: bash
-              args:
-                - -ceu
-                - |
-                  echo "Starting scan in mode: $SCAN_MODE"
-                  CONTEXT_FILE="contexts/${SCAN_MODE}.context"
-                  if [[ ! -f "$CONTEXT_FILE" ]]; then
-                    echo "ERROR: context file not found: $CONTEXT_FILE" >&2
-                    exit 1
-                  fi
-
-                  auth_header=""
-                  if [[ "$SCAN_MODE" != "unauthenticated" ]]; then
-                    client_id=$(jq -r .client_id <<<"$CREDHB_CRED")
-                    client_secret=$(jq -r .client_secret <<<"$CREDHB_CRED")
-                    token_uri=$(jq -r .token_uri <<<"$CREDHB_CRED")
-                    token=$(curl -s -u "$client_id:$client_secret" \
-                            -d 'grant_type=client_credentials' \
-                            "$token_uri" | jq -r .access_token)
-                    auth_header="-authheader \"Authorization: Bearer $token\""
-                  fi
-
-                  echo "Using context: $CONTEXT_FILE"
-                  zap.sh -cmd \
-                    -context "$CONTEXT_FILE" \
-                    -quickurl "$TARGET_URL" \
-                    $auth_header \
-                    -r zap-report-((.:mode)).html \
-                    -J zap-report-((.:mode)).json
-
-      - put: zap-report-archive
-        params:
-          file: zap-report-*/report.json
+              CREDHB_CRED: ((credentials.$SCAN_MODE))
 
 groups:
   - name: default
