@@ -20,34 +20,29 @@ RUN if [ "${ENABLE_ADDON_UPDATE}" = "true" ]; then \
     fi
 
 ################################################################################
-# STAGE 2 — FINAL IMAGE: your hardened Ubuntu base (no STIG steps needed here)
+# STAGE 2 — FINAL IMAGE: your hardened Ubuntu base with Java 21 LTS
 ################################################################################
 FROM ${base_image}
 USER root
 WORKDIR /zap
 ARG DEBIAN_FRONTEND=noninteractive
 
-# Copy ZAP from builder
-COPY --from=zap-builder /zap /zap
-
-# Install runtime tools, API client, then harden only under /zap
+# Install Java 21 runtime, tools, and API client, then harden only under /zap
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
+    openjdk-21-jre-headless \  
     curl jq python3-pip && \
     pip3 install --no-cache-dir zaproxy && \
-    # Harden: strip setuid/setgid only in /zap, ignore /proc, /sys, etc.
+    # Harden: strip setuid/setgid binaries in /zap only
     find /zap -xdev -perm /6000 -type f -exec chmod a-s {} + 2>/dev/null && \
-    # Clean up
+    # Clean up APT caches and unneeded packages
     apt-get purge -y curl jq && \
     apt-get autoremove -y && \
     rm -rf /var/lib/apt/lists/* /usr/share/doc /usr/share/man
 
-# Create and switch to non-root user
-RUN useradd -u 1000 -m -s /bin/bash zap && chown -R zap:zap /zap
-USER zap
-
-# Environment & health-check
-ENV PATH="/usr/lib/jvm/java-17-openjdk-amd64/bin:/zap:$PATH" \
+# Set JAVA_HOME so ZAP scripts detect Java 21 correctly
+ENV JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64 \
+    PATH="$JAVA_HOME/bin:$PATH:/zap" \
     ZAP_PORT=8080 \
     IS_CONTAINERIZED=true
 
