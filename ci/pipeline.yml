@@ -13,20 +13,22 @@ jobs:
 
   - name: scan-all-contexts
     plan:
-      - get: ((repo_name))
+      - get: zap-config
+        trigger: true
+
+      - get: zap-runner
         trigger: true
         passed: [set-self]
 
       - across:
           - var: mode
-            values: ["unauthenticated"]
-            # To scan all contexts in parallel, uncomment & adjust:
-            # values: ["internal","external","pages","app","unauthenticated"]
-            max_in_flight: all
+            # will loop 4 contexts, but scan only those URLs present
+            values: ["internal", "external", "pages", "unauthenticated"]
+        max_in_flight: all
         fail_fast: false
         do:
           - task: zap-scan
-            file: ((repo_name))/ci/tasks/zap-scan.yml
+            file: zap-runner/ci/tasks/zap-scan.yml
             vars:
               repo_name: ((repo_name))
               runner_tag: ((runner_tag))
@@ -48,6 +50,14 @@ resources:
       branch: main
       commit_verification_keys: ((cloud-gov-pgp-keys))
       ignore_paths: ["Dockerfile"]
+
+  - name: zap-config
+    type: git
+    source:
+      uri: https://github.com/cloud-gov/zap-runner
+      branch: main
+      paths:
+        - ci/zap-config/**
 
 #  - name: daily
 #    type: time
