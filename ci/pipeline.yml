@@ -15,6 +15,7 @@ jobs:
     plan:
       - get: ((repo_name))
         trigger: true
+        passed: [set-self]
 
       - across:
           - var: mode
