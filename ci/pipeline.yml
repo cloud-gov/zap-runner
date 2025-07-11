@@ -6,7 +6,7 @@ jobs:
       - get: ((repo_name))
         trigger: true
 
-      - set_pipeline: zap-scanner
+      - set_pipeline: ((repo_name))
         file: ((repo_name))/ci/pipeline.yml
         var_files:
           - ((repo_name))/ci/config.yml
@@ -20,16 +20,14 @@ jobs:
           - var: mode
             values: ["unauthenticated"]
             # To scan all contexts in parallel, uncomment & adjust:
-            #   values: ["internal","external","pages","app","unauthenticated"]
+            # values: ["internal","external","pages","app","unauthenticated"]
             max_in_flight: all
-
         fail_fast: false
         do:
-          - task: zap-scan-((mode))
+          - task: zap-scan
             file: ((repo_name))/ci/tasks/zap-scan.yml
             params:
-              SCAN_MODE: ((mode))
-              TARGET_URL: ((target-url))
+              SCAN_MODE: ((.:mode))
               CREDHB_CRED: ((credentials.$SCAN_MODE))
 
 groups:

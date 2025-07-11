@@ -1,3 +1,4 @@
+# ci/tasks/zap-scan.yml
 ---
 platform: linux
 
@@ -13,12 +14,12 @@ image_resource:
 inputs:
   - name: contexts
   - name: ((repo_name))
+
 outputs:
-  - name: zap-report-((.:mode))
+  - name: zap-report
 
 params:
   SCAN_MODE:
-  TARGET_URL:
   CREDHB_CRED:
 
 run:
@@ -33,6 +34,11 @@ run:
         exit 1
       fi
 
+      # extract first <incregexes> URL as the quick-start URL
+      QUICK_URL=$(grep -m1 '<incregexes>' "$CONTEXT_FILE" \
+                  | sed -E 's/.*>([^<]+)<.*/\1/')
+      echo "Using quick URL: $QUICK_URL"
+
       auth_header=""
       if [[ "$SCAN_MODE" != "unauthenticated" ]]; then
         client_id=$(jq -r .client_id <<<"$CREDHB_CRED")
@@ -44,12 +50,12 @@ run:
         auth_header="-authheader \"Authorization: Bearer $token\""
       fi
 
-      echo "Using context: $CONTEXT_FILE"
+      mkdir -p zap-report
       zap.sh -cmd \
         -context "$CONTEXT_FILE" \
-        -quickurl "$TARGET_URL" \
+        -quickurl "$QUICK_URL" \
         $auth_header \
-        -r zap-report-((.:mode)).html \
-        -J zap-report-((.:mode)).json
+        -r zap-report/report-${SCAN_MODE}.html \
+        -J zap-report/report-${SCAN_MODE}.json
 
-      echo "Scan complete, reports in zap-report/"
+      echo "Scan complete; reports in zap-report/"
