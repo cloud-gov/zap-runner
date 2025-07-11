@@ -28,7 +28,7 @@ jobs:
               - "pages"
               - "unauthenticated"
             max_in_flight: all
-            fail_fast: false
+        fail_fast: false
         do:
           - task: zap-scan
             file: zap-runner/ci/tasks/zap-scan.yml
