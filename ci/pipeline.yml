@@ -27,11 +27,12 @@ jobs:
         do:
           - task: zap-scan
             file: ((repo_name))/ci/tasks/zap-scan.yml
+            vars:
+              repo_name: ((repo_name))
+              runner_tag: ((runner_tag))
             params:
               SCAN_MODE: ((.:mode))
               CREDHB_CRED: ((credentials.$SCAN_MODE))
-              repo_name: ((repo_name))
-              runner_tag: ((runner_tag))
 
 groups:
   - name: default
