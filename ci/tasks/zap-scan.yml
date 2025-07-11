@@ -20,8 +20,6 @@ outputs:
 params:
   TARGET_CONTEXT: # one of internal, external, pages, unauthenticated
   CREDHB_CRED: # JSON with all context credentials
-  repo_name:
-  runner_tag:
 
 run:
   path: bash
@@ -34,9 +32,10 @@ run:
 
       CREDS_JSON="$CREDHB_CRED"
 
+      # Filter URLs for this context
       mapfile -t URLS < <(
         tail -n +2 ci/zap-config/urls.csv | \
-        awk -F',' -v ctx="$TARGET_CONTEXT" '$1==ctx {print $2}'
+        awk -F',' -v ctx="$TARGET_CONTEXT" '$1==ctx { print $2 }'
       )
 
       if [ ${#URLS[@]} -eq 0 ]; then
@@ -44,6 +43,7 @@ run:
         exit 0
       fi
 
+      # Extract credentials for this context
       CLIENT_ID=$(jq -r --arg ctx "$TARGET_CONTEXT" '.[$ctx].client_id' <<<"$CREDS_JSON")
       CLIENT_SECRET=$(jq -r --arg ctx "$TARGET_CONTEXT" '.[$ctx].client_secret' <<<"$CREDS_JSON")
       TOKEN_URI=$(jq -r --arg ctx "$TARGET_CONTEXT" '.[$ctx].token_uri' <<<"$CREDS_JSON")
