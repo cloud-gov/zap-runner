@@ -2,8 +2,8 @@
 repo_name: zap-runner
 
 # Scan configuration remains the same:
-target-url: ((target-url))
-scan-mode: ((scan-mode))
+#target-url: ((target-url))
+#scan-mode: ((scan-mode))
 
 credentials:
   internal:

@@ -1,30 +1,34 @@
+# ci/pipeline.yml
 ---
 jobs:
   - name: set-self
     plan:
       - get: ((repo_name))
         trigger: true
-      - set_pipeline:
-          file: ((repo_name))/ci/pipeline.yml
-          var_files:
-            - ((repo_name))/ci/config.yml
+
+      - set_pipeline: ((repo_name))
+        file: ((repo_name))/ci/pipeline.yml
+        var_files:
+          - ((repo_name))/ci/config.yml
 
   - name: scan-all-contexts
     plan:
       - get: ((repo_name))
         trigger: true
+
       - across:
           - var: mode
             values: ["unauthenticated"]
+            # To scan all contexts in parallel, uncomment & adjust:
+            #   values: ["internal","external","pages","app","unauthenticated"]
+            max_in_flight: all
 
-        #   values: ["internal", "external", "pages", "app", "unauthenticated"]
-        max_in_flight: all
         fail_fast: false
         do:
-          - task: zap-scan-((.:mode))
+          - task: zap-scan-((mode))
             file: ((repo_name))/ci/tasks/zap-scan.yml
             params:
-              SCAN_MODE: ((.:mode))
+              SCAN_MODE: ((mode))
               TARGET_URL: ((target-url))
               CREDHB_CRED: ((credentials.$SCAN_MODE))
 
@@ -42,10 +46,10 @@ resources:
       branch: main
       commit_verification_keys: ((cloud-gov-pgp-keys))
 
-  - name: daily
-    type: time
-    source:
-      interval: 12h
+#  - name: daily
+#    type: time
+#    source:
+#      interval: 12h
 
 resource_types:
   - name: registry-image
