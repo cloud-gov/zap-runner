@@ -1,0 +1,8 @@
+context,url
+internal,https://internal1.cloud.gov
+internal,https://internal2.cloud.gov
+external,https://public-api.cloud.gov
+pages,https://pages-staging.cloud.gov
+pages,https://pages.cloud.gov
+unauthenticated,https://login.fr.cloud.gov
+unauthenticated,https://idp.fr.cloud.gov

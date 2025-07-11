@@ -1,4 +1,3 @@
-# ci/tasks/zap-scan.yml
 ---
 platform: linux
 
@@ -12,6 +11,7 @@ image_resource:
     tag: ((runner_tag))
 
 inputs:
+  - name: zap-config
   - name: ((repo_name))
 
 outputs:
@@ -20,41 +20,57 @@ outputs:
 params:
   SCAN_MODE:
   CREDHB_CRED:
+  repo_name:
+  runner_tag:
 
 run:
   path: bash
   args:
-    - -ceu
+    - -ceux
     - |
-      echo "Starting scan in mode: $SCAN_MODE"
-      CONTEXT_FILE="((repo_name))/ci/contexts/${SCAN_MODE}.context"
-      if [[ ! -f "$CONTEXT_FILE" ]]; then
-        echo "ERROR: context file not found: $CONTEXT_FILE" >&2
-        exit 1
+      #!/usr/bin/env bash
+
+      echo "Scanning all URLs in context '${SCAN_MODE}' as a single batch"
+
+      # 1) Extract credentials
+      CLIENT_ID=$(jq -r .client_id <<<"$CREDHB_CRED")
+      CLIENT_SECRET=$(jq -r .client_secret <<<"$CREDHB_CRED")
+      TOKEN_URI=$(jq -r .token_uri <<<"$CREDHB_CRED")
+
+      # 2) Gather URLs for this context
+      mapfile -t URLS < <(
+        tail -n +2 zap-config/urls.csv | \
+        awk -F',' -v ctx="$SCAN_MODE" '$1==ctx { print $2 }'
+      )
+
+      if [ ${#URLS[@]} -eq 0 ]; then
+        echo "No URLs for context '$SCAN_MODE', skipping."
+        exit 0
       fi
 
-      # extract first <incregexes> URL as the quick-start URL
-      QUICK_URL=$(grep -m1 '<incregexes>' "$CONTEXT_FILE" \
-                  | sed -E 's/.*>([^<]+)<.*/\1/')
-      echo "Using quick URL: $QUICK_URL"
+      echo "URLs to scan: ${URLS[*]}"
 
-      auth_header=""
-      if [[ "$SCAN_MODE" != "unauthenticated" ]]; then
-        client_id=$(jq -r .client_id <<<"$CREDHB_CRED")
-        client_secret=$(jq -r .client_secret <<<"$CREDHB_CRED")
-        token_uri=$(jq -r .token_uri <<<"$CREDHB_CRED")
-        token=$(curl -s -u "$client_id:$client_secret" \
-                -d 'grant_type=client_credentials' \
-                "$token_uri" | jq -r .access_token)
-        auth_header="-authheader \"Authorization: Bearer $token\""
-      fi
+      # 3) Build zap-baseline.py target flags
+      TARGET_ARGS=()
+      for url in "${URLS[@]}"; do
+        TARGET_ARGS+=( -t "$url" )
+      done
 
+      # 4) Create output directory
       mkdir -p zap-report
-      zap.sh -cmd \
-        -context "$CONTEXT_FILE" \
-        -quickurl "$QUICK_URL" \
-        $auth_header \
-        -r zap-report/report-${SCAN_MODE}.html \
-        -J zap-report/report-${SCAN_MODE}.json
 
-      echo "Scan complete; reports in zap-report/"
+      # 5) Define output files
+      HTML_OUT="zap-report/${SCAN_MODE}.html"
+      JSON_OUT="zap-report/${SCAN_MODE}.json"
+      XML_OUT="zap-report/${SCAN_MODE}.xml"
+
+      # 6) Run ZAP baseline with HTML, JSON, and XML outputs
+      zap-baseline.py \
+        "${TARGET_ARGS[@]}" \
+        -c zap-config/zap.yaml \
+        -r "$HTML_OUT" \
+        -J "$JSON_OUT" \
+        -x "$XML_OUT" \
+        -t "${CLIENT_ID}:${CLIENT_SECRET}:${TOKEN_URI}"
+
+      echo "Context scan '${SCAN_MODE}' complete: $HTML_OUT, $JSON_OUT, $XML_OUT"
