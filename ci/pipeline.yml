@@ -17,12 +17,17 @@ jobs:
 
       - get: zap-runner
         trigger: true
-        passed: [set-self]
+        passed:
+          - set-self
 
       - across:
           - var: context
-            values: ["internal", "external", "pages", "unauthenticated"]
-        limit: all
+            values:
+              - "internal"
+              - "external"
+              - "pages"
+              - "unauthenticated"
+        max_in_flight: all
         fail_fast: false
         do:
           - task: zap-scan
