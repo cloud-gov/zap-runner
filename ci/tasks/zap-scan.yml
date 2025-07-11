@@ -12,7 +12,6 @@ image_resource:
     tag: ((runner_tag))
 
 inputs:
-  - name: contexts
   - name: ((repo_name))
 
 outputs:
@@ -28,7 +27,7 @@ run:
     - -ceu
     - |
       echo "Starting scan in mode: $SCAN_MODE"
-      CONTEXT_FILE="contexts/${SCAN_MODE}.context"
+      CONTEXT_FILE="((repo_name))/contexts/${SCAN_MODE}.context"
       if [[ ! -f "$CONTEXT_FILE" ]]; then
         echo "ERROR: context file not found: $CONTEXT_FILE" >&2
         exit 1
