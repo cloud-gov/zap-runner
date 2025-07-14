@@ -12,9 +12,6 @@ jobs:
 
   - name: scan-all-contexts
     plan:
-      - get: zap-config
-        trigger: true
-
       - get: zap-runner
         trigger: true
         passed:
@@ -44,6 +41,7 @@ groups:
     jobs:
       - set-self
       - scan-all-contexts
+
 resources:
   - name: zap-runner
     type: git
