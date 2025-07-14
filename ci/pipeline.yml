@@ -44,7 +44,7 @@ groups:
     jobs:
       - set-self
       - scan-all-contexts
-
+resources:
   - name: zap-runner
     type: git
     source:
