@@ -40,6 +40,7 @@ RUN apt-get update && \
     curl \
     jq \
     python3-pip && \
+    python-is-python3 && \
     pip3 install --no-cache-dir zaproxy && \
     find /zap -xdev -perm /6000 -type f -exec chmod a-s {} + && \
     apt-get purge -y python3-pip && \
