@@ -10,7 +10,6 @@ image_resource:
     tag: ((runner_tag))
 
 inputs:
-  - name: zap-config # contains zap-config/urls.csv & zap-config/zap.yaml
   - name: ((repo_name))
 
 outputs:
@@ -33,7 +32,7 @@ run:
 
       # Filter URLs for this context
       mapfile -t URLS < <(
-        tail -n +2 zap-config/urls.csv | \
+        tail -n +2 ((repo_name))/ci/zap-config/urls.csv | \
         awk -F',' -v ctx="$TARGET_CONTEXT" '$1==ctx { print $2 }'
       )
 
