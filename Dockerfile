@@ -39,11 +39,14 @@ RUN apt-get update && \
     openjdk-21-jre-headless \
     curl \
     jq \
-    python3-pip && \
+    python3-pip \
+    python-is-python3 && \
     pip3 install --no-cache-dir zaproxy && \
-    find /zap -xdev -perm /6000 -type f -exec chmod a-s {} + && \
+    # mark python3 as “manually installed” so it won’t be auto-removed:
+    apt-mark manual python3 python3-minimal && \
+    # now purge pip and only its true dependencies:
     apt-get purge -y python3-pip && \
-    apt-get autoremove -y && \
+    apt-get autoremove -y --purge && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/* /usr/share/doc /usr/share/man
 
