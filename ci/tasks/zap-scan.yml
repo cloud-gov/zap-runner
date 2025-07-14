@@ -17,7 +17,7 @@ outputs:
 
 params:
   TARGET_CONTEXT: # one of internal, external, pages, unauthenticated
-  CREDHB_CRED: # JSON with all context credentials
+  CREDHB_CRED: ((repo_name))/ci/config.yml
 
 run:
   path: bash
