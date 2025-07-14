@@ -40,7 +40,6 @@ RUN apt-get update && \
     curl \
     jq \
     python3-pip && \
-    python-is-python3 && \
     pip3 install --no-cache-dir zaproxy && \
     find /zap -xdev -perm /6000 -type f -exec chmod a-s {} + && \
     apt-get purge -y python3-pip && \
@@ -75,5 +74,7 @@ HEALTHCHECK --interval=30s --timeout=5s \
     CMD curl -fs http://localhost:${ZAP_PORT}/ || exit 1
 
 # Default entrypoint and command
-ENTRYPOINT ["zap-baseline.py"]
-CMD ["-daemon", "-r", "/zap/wrk/report.html", "-J", "/zap/wrk/report.json"]
+# ENTRYPOINT ["zap-baseline.py"]
+# CMD ["-daemon", "-r", "/zap/wrk/report.html", "-J", "/zap/wrk/report.json"]
+ENTRYPOINT ["python3", "-u", "/zap/zap-baseline.py"]
+CMD ["-daemon", "-r", "/zap/wrk/report.html", "-J", "/zap/wrk/report.json"] 
