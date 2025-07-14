@@ -42,8 +42,9 @@ RUN apt-get update && \
     python3-pip && \
     pip3 install --no-cache-dir zaproxy && \
     find /zap -xdev -perm /6000 -type f -exec chmod a-s {} + && \
-    apt-get purge -y curl jq python3-pip && \
+    apt-get purge -y python3-pip && \
     apt-get autoremove -y && \
+    apt-get clean && \
     rm -rf /var/lib/apt/lists/* /usr/share/doc /usr/share/man
 
 # Create non-root zap user and set permissions

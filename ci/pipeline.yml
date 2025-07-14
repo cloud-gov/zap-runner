@@ -45,15 +45,6 @@ groups:
       - set-self
       - scan-all-contexts
 
-resources:
-  - name: zap-config
-    type: git
-    source:
-      uri: https://github.com/cloud-gov/zap-runner
-      branch: main
-      paths:
-        - ci/zap-config/**
-
   - name: zap-runner
     type: git
     source:
