@@ -40,7 +40,6 @@ RUN apt-get update && \
     curl \
     jq \
     python3-pip \
-    python-is-python3 && \
     pip3 install --no-cache-dir zaproxy && \
     apt-get autoremove -y --purge && \
     apt-get clean && \
