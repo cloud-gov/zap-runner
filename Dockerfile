@@ -43,8 +43,6 @@ RUN apt-get update && \
     && \
     pip3 install --no-cache-dir zaproxy \
     && apt-mark manual python3 python3-minimal \
-    && apt-get purge -y python3-pip \
-    && apt-get autoremove -y --purge \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* /usr/share/doc /usr/share/man
 
