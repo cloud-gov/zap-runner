@@ -21,7 +21,7 @@ RUN if [ "${ENABLE_ADDON_UPDATE}" = "true" ]; then \
     fi
 
 ################################################################################
-# STAGE 2 — FINAL IMAGE: your hardened Ubuntu base with Java 21 LTS
+# STAGE 2 — FINAL IMAGE: hardened Ubuntu base with Java 21 LTS
 ################################################################################
 FROM ${base_image}
 
@@ -40,10 +40,11 @@ RUN apt-get update && \
     curl \
     jq \
     python3-pip \
-    pip3 install --no-cache-dir zaproxy && \
-    apt-get autoremove -y --purge && \
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists/* /usr/share/doc /usr/share/man
+    && \
+    pip3 install --no-cache-dir zaproxy \
+    && apt-mark manual python3 python3-minimal \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/* /usr/share/doc /usr/share/man
 
 # Create non-root zap user and set permissions
 RUN useradd -u 1000 -m -s /bin/bash zap && \
@@ -72,7 +73,5 @@ HEALTHCHECK --interval=30s --timeout=5s \
     CMD curl -fs http://localhost:${ZAP_PORT}/ || exit 1
 
 # Default entrypoint and command
-# ENTRYPOINT ["zap-baseline.py"]
-# CMD ["-daemon", "-r", "/zap/wrk/report.html", "-J", "/zap/wrk/report.json"]
 ENTRYPOINT ["python3", "-u", "/zap/zap-baseline.py"]
-CMD ["-daemon", "-r", "/zap/wrk/report.html", "-J", "/zap/wrk/report.json"] 
+CMD ["-daemon", "-r", "/zap/wrk/report.html", "-J", "/zap/wrk/report.json"]
