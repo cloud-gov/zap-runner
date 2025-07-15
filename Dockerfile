@@ -71,4 +71,4 @@ HEALTHCHECK --interval=30s --timeout=5s \
 
 # Default entrypoint and command
 ENTRYPOINT ["python3", "-u", "/zap/zap-baseline.py"]
-CMD ["-daemon", "-r", "/zap/wrk/report.html", "-J", "/zap/wrk/report.json"]
+CMD ["-daemon"]
