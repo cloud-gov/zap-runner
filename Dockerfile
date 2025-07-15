@@ -36,13 +36,10 @@ COPY --from=zap-builder /zap /zap
 # Install Java 21 LTS and necessary tooling, then harden under /zap
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-    openjdk-21-jre-headless \
-    curl \
-    jq \
-    python3-pip \
-    && \
-    pip3 install --no-cache-dir zaproxy \
-    && apt-mark manual python3 python3-minimal \
+    openjdk-21-jre-headless xvfb unzip jq git curl jq \
+    python3-pip python-is-python3 \
+    python3-yaml python3-requests python3-websocket && \
+    pip3 install --no-cache-dir zaproxy PyYAML \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* /usr/share/doc /usr/share/man
 

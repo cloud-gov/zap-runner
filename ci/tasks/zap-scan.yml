@@ -64,7 +64,7 @@ run:
           echo "Warning: missing credentials for context '$TARGET_CONTEXT'; proceeding without auth."
         fi
 
-        zap-baseline.py \
+        /zap/zap-baseline.py \
           -t "$url" \
           -c zap-config/zap.yaml \
           -r "$HTML_OUT" \
