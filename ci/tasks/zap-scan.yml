@@ -14,7 +14,7 @@ inputs:
 
 outputs:
   - name: zap-report
-    dir-path: /zap/wrk
+    path: /zap/wrk
 
 params:
   TARGET_CONTEXT: # one of internal, external, pages, unauthenticated
