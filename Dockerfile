@@ -50,6 +50,11 @@ RUN useradd -u 1000 -m -s /bin/bash zap && \
 # Switch to non-root for runtime
 USER zap
 
+# Ensure the workspace directory exists and is owned by our zap user
+RUN mkdir -p /zap/wrk \
+    && chown -R zap:zap /zap/wrk
+# Declare it as a volume so runtimes can mount it
+VOLUME ["/zap/wrk"]
 # Configure environment for ZAP
 ENV JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64 \
     PATH=${JAVA_HOME}/bin:/zap:${PATH} \

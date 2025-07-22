@@ -14,6 +14,7 @@ inputs:
 
 outputs:
   - name: zap-report
+    dir-path: /zap/wrk
 
 params:
   TARGET_CONTEXT: # one of internal, external, pages, unauthenticated
@@ -46,13 +47,11 @@ run:
       CLIENT_SECRET=$(jq -r --arg ctx "$TARGET_CONTEXT" '.[$ctx].client_secret // empty' <<<"$CREDS_JSON")
       TOKEN_URI=$(jq -r --arg ctx "$TARGET_CONTEXT" '.[$ctx].token_uri // empty' <<<"$CREDS_JSON")
 
-      mkdir -p zap-report
-
       for url in "${URLS[@]}"; do
         host=$(echo "$url" | sed -E 's#https?://##;s#/.*##')
-        HTML_OUT="zap-report/${TARGET_CONTEXT}-${host}.html"
-        JSON_OUT="zap-report/${TARGET_CONTEXT}-${host}.json"
-        XML_OUT="zap-report/${TARGET_CONTEXT}-${host}.xml"
+        HTML_OUT="/zap/wrk/${TARGET_CONTEXT}-${host}.html"
+        JSON_OUT="/zap/wrk/${TARGET_CONTEXT}-${host}.json"
+        XML_OUT="/zap/wrk/${TARGET_CONTEXT}-${host}.xml"
 
         echo "→ Scanning $url"
 
