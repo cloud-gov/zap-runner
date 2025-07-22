@@ -30,7 +30,7 @@ jobs:
   - type: report
     parameters:
       template: "traditional-html"
-      reportDir: "zap-report"
+      reportDir: "/zap/wrk"
       reportFile: "{{yyyy-MM-dd}}-[[site]]-html.html"
       displayReport: false
     risks:
@@ -47,7 +47,7 @@ jobs:
   - type: report
     parameters:
       template: "traditional-json"
-      reportDir: "zap-report"
+      reportDir: "/zap/wrk"
       reportFile: "{{yyyy-MM-dd}}-[[site]]-json.json"
       displayReport: false
       risks:
@@ -64,7 +64,7 @@ jobs:
   - type: report
     parameters:
       template: "traditional-xml"
-      reportDir: "zap-report"
+      reportDir: "/zap/wrk"
       reportFile: "{{yyyy-MM-dd}}-[[site]]-xml.xml"
       displayReport: false
       risks:
@@ -77,11 +77,11 @@ jobs:
         - medium
   #      - low
   #      - falsepositive
-  
+
   - type: report
     parameters:
       template: "sarif-json"
-      reportDir: "zap-report"
+      reportDir: "/zap/wrk"
       reportFile: "{{yyyy-MM-dd}}-[[site]]-sarif.sarif.json"
       displayReport: false
       risks:
