@@ -1,0 +1,100 @@
+platform: linux
+
+image_resource:
+  type: registry-image
+  source:
+    repository: python
+    tag: 3.11-slim
+
+inputs:
+  - name: zap-reports
+
+outputs:
+  - name: processed-results
+
+params:
+  SCAN_CONTEXT:
+  SLACK_WEBHOOK:
+  ALERT_THRESHOLD:
+
+run:
+  path: bash
+  args:
+    - -c
+    - |
+      pip install requests
+      python << 'EOF'
+      import json
+      import os
+      import requests
+      import glob
+
+      context = os.environ.get('SCAN_CONTEXT')
+      webhook = os.environ.get('SLACK_WEBHOOK')
+      threshold = os.environ.get('ALERT_THRESHOLD', 'MEDIUM')
+
+      # Find the latest report
+      reports = glob.glob(f'zap-reports/{context}-*-summary.json')
+      if not reports:
+          print("No summary report found")
+          exit(1)
+
+      with open(reports[0], 'r') as f:
+          summary = json.load(f)
+
+      # Process alerts
+      alerts = summary.get('alert_summary', {})
+      high_count = int(alerts.get('High', 0))
+      medium_count = int(alerts.get('Medium', 0))
+      low_count = int(alerts.get('Low', 0))
+
+      # Determine status
+      status = "✅ PASSED"
+      color = "good"
+
+      if threshold == "HIGH" and high_count > 0:
+          status = "❌ FAILED"
+          color = "danger"
+      elif threshold == "MEDIUM" and (high_count > 0 or medium_count > 0):
+          status = "❌ FAILED"
+          color = "danger"
+      elif high_count > 0:
+          color = "warning"
+
+      # Build Slack message
+      message = {
+          "attachments": [{
+              "color": color,
+              "title": f"ZAP Scan Results: {context}",
+              "fields": [
+                  {"title": "Status", "value": status, "short": True},
+                  {"title": "URLs Scanned", "value": summary.get('urls_scanned', 0), "short": True},
+                  {"title": "High Alerts", "value": high_count, "short": True},
+                  {"title": "Medium Alerts", "value": medium_count, "short": True},
+                  {"title": "Low Alerts", "value": low_count, "short": True},
+                  {"title": "Scan Type", "value": summary['scan_configuration']['scan_type'], "short": True}
+              ],
+              "footer": "OWASP ZAP",
+              "ts": summary.get('timestamp', '')
+          }]
+      }
+
+      # Send to Slack if webhook provided
+      if webhook:
+          response = requests.post(webhook, json=message)
+          print(f"Slack notification sent: {response.status_code}")
+
+      # Write processed results
+      os.makedirs('processed-results', exist_ok=True)
+      with open('processed-results/summary.json', 'w') as f:
+          json.dump({
+              "context": context,
+              "status": status,
+              "alerts": alerts,
+              "threshold_exceeded": status == "❌ FAILED"
+          }, f)
+
+      # Exit with error if threshold exceeded
+      if status == "❌ FAILED":
+          exit(1)
+      EOF

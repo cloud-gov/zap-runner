@@ -1,0 +1,10 @@
+# Unauthenticated public scanning
+AUTH_TYPE: none
+SCAN_TYPE: baseline
+SPIDER_MAX_DEPTH: 5
+MAX_SCAN_DURATION: 45
+ALERT_THRESHOLD: LOW
+
+# Public scan settings
+RATE_LIMIT: 10
+USER_AGENT: "GSA-ZAP-Scanner/1.0"

@@ -1,0 +1,98 @@
+# Add these sections to your main pipeline.yml for advanced features
+
+jobs:
+  # Aggregate results job
+  - name: aggregate-scan-results
+    plan:
+      - in_parallel:
+          steps:
+            - get: scan-results
+              trigger: true
+              passed:
+                [
+                  scan-internal,
+                  scan-external,
+                  scan-api,
+                  scan-cloud-gov-pages,
+                  scan-unauthenticated,
+                ]
+      - task: generate-dashboard
+        config:
+          platform: linux
+          image_resource:
+            type: registry-image
+            source:
+              repository: python
+              tag: 3.11-slim
+          inputs:
+            - name: scan-results
+          outputs:
+            - name: dashboard
+          run:
+            path: bash
+            args:
+              - -c
+              - |
+                pip install jinja2 matplotlib pandas
+                python << 'SCRIPT'
+                import json
+                import glob
+                from datetime import datetime
+                import matplotlib.pyplot as plt
+                import pandas as pd
+                from jinja2 import Template
+
+                # Collect all results
+                results = []
+                for summary in glob.glob('scan-results/*-summary.json'):
+                    with open(summary) as f:
+                        results.append(json.load(f))
+
+                # Generate charts and HTML dashboard
+                # ... (dashboard generation code)
+                SCRIPT
+      - put: dashboard-bucket
+        params:
+          file: dashboard/index.html
+          acl: public-read
+
+  # Compliance reporting job
+  - name: generate-compliance-report
+    plan:
+      - get: end-of-week
+        trigger: true
+      - get: scan-results
+        passed: [aggregate-scan-results]
+      - task: create-fisma-report
+        file: zap-runner/ci/tasks/fisma-report.yml
+      - put: compliance-reports
+        params:
+          file: fisma-report/weekly-*.pdf
+
+resources:
+  # Additional resources for advanced features
+  - name: end-of-week
+    type: time
+    source:
+      start: 5:00 PM
+      stop: 6:00 PM
+      location: America/New_York
+      days: [Friday]
+
+  - name: dashboard-bucket
+    type: s3
+    source:
+      bucket: ((dashboard-bucket))
+      regexp: zap-dashboard/(.*)
+      access_key_id: ((ecr_aws_key))
+      secret_access_key: ((ecr_aws_secret))
+      region_name: us-gov-west-1
+
+  - name: compliance-reports
+    type: s3
+    source:
+      bucket: ((compliance-bucket))
+      regexp: reports/(.*)
+      access_key_id: ((ecr_aws_key))
+      secret_access_key: ((ecr_aws_secret))
+      region_name: us-gov-west-1

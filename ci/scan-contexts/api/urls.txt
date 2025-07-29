@@ -1,0 +1,3 @@
+# API endpoints
+https://api.cloud.gov/v3
+https://api.fr.cloud.gov/v3

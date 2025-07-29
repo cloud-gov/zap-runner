@@ -1,0 +1,6 @@
+# Internal cloud.gov applications
+https://dashboard.fr.cloud.gov
+https://logs.fr.cloud.gov
+https://prometheus.fr.cloud.gov
+https://alertmanager.fr.cloud.gov
+https://grafana.fr.cloud.gov

@@ -1,0 +1,14 @@
+# UAA-specific configuration for internal apps
+AUTH_TYPE: oauth2
+UAA_BASE_URL: https://uaa.fr.cloud.gov
+TOKEN_ENDPOINT: /oauth/token
+AUTHORIZE_ENDPOINT: /oauth/authorize
+TOKEN_EXPIRY_BUFFER: 300 # Refresh token 5 minutes before expiry
+
+# UAA OAuth2 settings
+GRANT_TYPE: client_credentials
+SCOPE: "cloud_controller.read cloud_controller.write"
+
+# Session handling
+SESSION_TIMEOUT: 3600
+MAINTAIN_SESSION: true

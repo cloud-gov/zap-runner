@@ -1,0 +1,10 @@
+# API scanning configuration
+AUTH_TYPE: header
+SCAN_TYPE: api
+SPIDER_MAX_DEPTH: 3
+MAX_SCAN_DURATION: 90
+ALERT_THRESHOLD: HIGH
+
+# API-specific settings
+CONTENT_TYPE: application/json
+API_VERSION: v1

@@ -1,0 +1,10 @@
+# External public-facing applications
+AUTH_TYPE: none
+SCAN_TYPE: baseline
+SPIDER_MAX_DEPTH: 5
+MAX_SCAN_DURATION: 60
+ALERT_THRESHOLD: MEDIUM
+
+# External-specific settings
+VERIFY_SSL: true
+FOLLOW_REDIRECTS: false
