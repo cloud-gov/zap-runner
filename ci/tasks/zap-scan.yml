@@ -32,7 +32,7 @@ run:
       CREDS_JSON="$CREDHB_CRED"
 
       # Copy config file to expected directory
-      mkdir -p /zap/wrk/zap-config && cp ((repo_name))/ci/zap-config/zap.yaml /zap/wrk/zap-config/zap.yaml
+      cp ((repo_name))/ci/zap-config/zap.yaml /zap/wrk/zap-config/zap.yaml
 
       # Filter URLs for this context
       mapfile -t URLS < <(
