@@ -54,9 +54,6 @@ USER zap
 RUN mkdir -p /zap/wrk/zap-config \
     && chown -R zap:zap /zap/wrk
 
-# Declare it as a volume so runtimes can mount it
-VOLUME ["/zap/wrk"]
-
 # Configure environment for ZAP
 ENV JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64 \
     PATH=${JAVA_HOME}/bin:/zap:${PATH} \
