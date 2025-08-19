@@ -1,12 +1,3 @@
-Certainly! To support **multiple APIs** (each with its own OpenAPI specification) within your automation pipeline, we’ll set up the `ci/scan-contexts/api/` directory with everything needed. This will include:
-
-- Multiple `openapi-*.json` files (one per API)
-- A `config.yml` that defines scan behavior for all APIs
-- A `urls.txt` listing the API base URLs (optional, depending on design)
-- A `README.md` explaining how it's structured
-
-Below are the **complete, production-ready files** to drop into `ci/scan-contexts/api/`—nothing omitted, everything you need.
-
 ---
 
 ## 1. `ci/scan-contexts/api/config.yml`
