@@ -236,7 +236,7 @@ openapi_specs:
 
 ### Why This Setup Works
 
-- Remote imports are handled via ZAP's Automation Framework **`openapi` job**, which allows multiple definitions. :contentReference[oaicite:10]{index=10}
+- Remote imports are handled via ZAP's Automation Framework **`openapi` job**, which allows multiple definitions.
 - Structuring multiple specs gives you **clear, per-API reporting** and **fine-grained auth/control**.
 - Your existing `zap-af.yml` logic (with dynamic template generation) will loop over these files automatically, giving proper per-API outputs.
 
