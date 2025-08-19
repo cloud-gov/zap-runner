@@ -1,5 +1,3 @@
----
-
 ## Daily ZAP scans - every 24 hours
 
 The child pipeline `ci/child-pipelines/zap-dast.yml` includes a `time` resource with `interval: 24h` and scans the following contexts in parallel:
@@ -16,10 +14,11 @@ Tune or add contexts under `ci/scan-contexts/`. Put URLs in `urls.txt` and setti
 
 We rely on Concourse + CredHub to inject secrets as vars. The pipeline **does not** call `credhub` directly.
 
-- **CF UAA username/password → Bearer token**: the `acquire-auth` task runs `cf oauth-token`, which prints a bearer token that we pass to ZAP as an `Authorization` header. (See CF CLI help for `oauth-token`.)  
+- **CF UAA username/password → Bearer token**: the `acquire-auth` task runs `cf oauth-token`, which prints a bearer token that we pass to ZAP as an `Authorization` header. (See CF CLI help for `oauth-token`.)
 - **OpsUAA owner-password (UAAC)**: the `acquire-auth` task runs `uaac token owner get <client> <user> --secret <client_secret> --password <user_password>` to obtain a Bearer token (RFC 6749 “owner password” grant) and injects it as an `Authorization` header.
 
 ### Example variables (CredHub-backed)
+
 See `ci/vars/zap-dast.yml`. Populate via your Concourse var store (CredHub):
 
 ```yaml
@@ -29,7 +28,7 @@ zap:
     cloud-gov-pages: cf
   cf:
     cloud-gov-pages:
-      api:  https://api.fr.cloud.gov
+      api: https://api.fr.cloud.gov
       user: zap-scan-user
       pass: ((/concourse/main/zap-scanner/zap-scan-password-production))
   opsuaa:
@@ -38,7 +37,7 @@ zap:
     client_secret: ((/concourse/main/zap-scanner/zap_scan_client_secret-opsuaa))
     user: zap-scan-user
     pass: ((/concourse/main/zap-scanner/zap-scan-password-opsuaa))
-````
+```
 
 ## DefectDojo
 
