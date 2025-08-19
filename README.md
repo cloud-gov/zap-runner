@@ -1,6 +1,6 @@
 ---
 
-## Daily ZAP scans (every 24 hours)
+## Daily ZAP scans - every 24 hours
 
 The child pipeline `ci/child-pipelines/zap-dast.yml` includes a `time` resource with `interval: 24h` and scans the following contexts in parallel:
 
