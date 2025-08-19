@@ -1,0 +1,97 @@
+# ci/child-pipelines/zap-dast.yml
+---
+resource_types:
+  - name: registry-image
+    type: registry-image
+    source:
+      repository: registry-image-resource
+      tag: latest
+
+resources:
+  # Daily scheduler at 1 AM (local Eastern time); one version emitted in the window.
+  - name: daily-1am
+    type: time
+    source:
+      location: America/New_York # adjust if you want a different TZ
+      start: "1:00 AM" # window start
+      stop: "2:00 AM" # window stop (1-hr window; exactly-on-the-minute is not guaranteed)
+      days: [Sunday, Monday, Tuesday, Wednesday, Thursday, Friday, Saturday]
+
+  - name: zap-runner
+    type: git
+    source:
+      uri: https://github.com/cloud-gov/zap-runner
+      branch: main
+      commit_verification_keys: ((cloud-gov-pgp-keys))
+
+  - name: results-bucket
+    type: s3
+    source:
+      bucket: ((results_bucket))
+      regexp: zap-reports/(.*)
+      region_name: us-gov-west-1
+      access_key_id: ((ecr_aws_key))
+      secret_access_key: ((ecr_aws_secret))
+
+jobs:
+  - name: dast-scan-all
+    plan:
+      # Schedule gate: emits once per day in the window above; triggers job.
+      - get: daily-1am
+        trigger: true
+
+      - get: zap-runner
+        trigger: false
+
+      - across:
+          - var: context
+            values: [internal, api, external, cloud-gov-pages, unauthenticated]
+        do:
+          - task: acquire-auth-token
+            file: zap-runner/ci/tasks/acquire-auth.yml
+            vars: { context: ((.:context)) }
+            params:
+              # CF uaa: user-based token via cf8 + CredHub-managed password
+              AUTH_SOURCE: ((zap.auth_source.((.:context)) "cf"))
+              CF_API: ((zap.cf.((.:context)).api))
+              CF_USER: ((zap.cf.((.:context)).user))
+              CF_PASS: ((zap.cf.((.:context)).pass))
+
+              # OpsUAA owner credentials (optional per context)
+              OPSUAA_HOST: ((zap.opsuaa.host))
+              OPSUAA_CLIENT_ID: ((zap.opsuaa.client_id))
+              OPSUAA_CLIENT_SECRET: ((zap.opsuaa.client_secret))
+              OPSUAA_USER: ((zap.opsuaa.user))
+              OPSUAA_PASS: ((zap.opsuaa.pass))
+
+              # Fallback static bearer (rare / for testing)
+              STATIC_BEARER: ((zap.static_bearer.((.:context))?))
+
+          - task: zap-af
+            file: zap-runner/ci/tasks/zap-af.yml
+            vars: { context: ((.:context)), runner_tag: ((runner_tag)) }
+            params:
+              SCAN_CONTEXT: ((.:context))
+              AUTH_TOKEN_FILE: auth/token.txt
+
+          # Optional Slack summary, still running on your base image
+          - task: process-results
+            file: zap-runner/ci/tasks/process-results.yml
+            params:
+              SCAN_CONTEXT: ((.:context))
+              SLACK_WEBHOOK: ((slack_webhook))
+              ALERT_THRESHOLD: ((zap.threshold.((.:context)) "MEDIUM"))
+
+          # Push per-site XMLs to DefectDojo
+          - task: push-defectdojo
+            file: zap-runner/ci/tasks/push-defectdojo.yml
+            params:
+              DEFECTDOJO_URL: ((defectdojo.url ""))
+              DEFECTDOJO_API_KEY: ((defectdojo.api_key ""))
+              PRODUCT_ID: ((defectdojo.product_id "0"))
+              ENGAGEMENT_ID: ((defectdojo.engagement_id "0"))
+
+          # Store the full artifact bundle
+          - put: results-bucket
+            params:
+              file: zap-reports/*.tar.gz

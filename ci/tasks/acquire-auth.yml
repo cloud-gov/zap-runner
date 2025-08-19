@@ -1,0 +1,78 @@
+platform: linux
+image_resource:
+  type: registry-image
+  source:
+    # Your runner image that is built FROM ${base_image} (see Dockerfile)
+    repository: ((repo_name))
+    tag: ((runner_tag))
+
+inputs:
+  - name: zap-runner
+
+outputs:
+  - name: auth
+
+params:
+  # Choose one of: cf | opsuaa | header | none
+  AUTH_SOURCE:
+
+  # CF (UAA) username/password flow -> cf oauth-token (Bearer ...)
+  CF_API:
+  CF_USER:
+  CF_PASS:
+
+  # OpsUAA owner-password flow via UAAC (Bearer ...)
+  OPSUAA_HOST:
+  OPSUAA_CLIENT_ID:
+  OPSUAA_CLIENT_SECRET:
+  OPSUAA_USER:
+  OPSUAA_PASS:
+
+  # Static bearer (already provisioned—used for API key / header-only targets)
+  STATIC_BEARER:
+
+run:
+  path: bash
+  args:
+    - -euo
+    - pipefail
+    - -c
+    - |
+      set -euo pipefail
+      mkdir -p auth
+
+      case "${AUTH_SOURCE:-none}" in
+        cf)
+          echo "→ CF oauth-token using username/password"
+          if [[ -z "${CF_API:-}" || -z "${CF_USER:-}" || -z "${CF_PASS:-}" ]]; then
+            echo "Missing CF_* params"; exit 1
+          fi
+          cf api "${CF_API}" >/dev/null 2>&1
+          cf auth "${CF_USER}" "${CF_PASS}" >/dev/null 2>&1
+          cf oauth-token | sed 's/^bearer /Bearer /I' > auth/token.txt
+          ;;
+
+        opsuaa)
+          echo "→ OpsUAA owner-password via UAAC"
+          if [[ -z "${OPSUAA_HOST:-}" || -z "${OPSUAA_CLIENT_ID:-}" || -z "${OPSUAA_CLIENT_SECRET:-}" || -z "${OPSUAA_USER:-}" || -z "${OPSUAA_PASS:-}" ]]; then
+            echo "Missing OPSUAA_* params"; exit 1
+          fi
+          uaac target "https://${OPSUAA_HOST}" >/dev/null
+          uaac token owner get "${OPSUAA_CLIENT_ID}" "${OPSUAA_USER}" \
+            --secret "${OPSUAA_CLIENT_SECRET}" \
+            --password "${OPSUAA_PASS}" >/dev/null
+          uaac context | awk '/access_token/ {print "Bearer " $2}' > auth/token.txt
+          ;;
+
+        header)
+          echo "→ Using static bearer token (header mode)"
+          printf '%s\n' "Bearer ${STATIC_BEARER:-}" > auth/token.txt
+          ;;
+
+        none|*)
+          echo "→ No auth; writing empty token"
+          : > auth/token.txt
+          ;;
+      esac
+
+      echo "Token length: $(wc -c < auth/token.txt)"

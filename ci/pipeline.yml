@@ -1,79 +1,128 @@
 ---
-jobs:
-  - name: set-self
-    plan:
-      - get: zap-runner
-        trigger: true
-
-      - set_pipeline: zap-scanner
-        file: zap-runner/ci/pipeline.yml
-        var_files:
-          - zap-runner/ci/config.yml
-
-  - name: scan-all-contexts
-    plan:
-      - get: zap-runner
-        trigger: true
-        passed:
-          - set-self
-
-      - across:
-          - var: context
-            values:
-              - "internal"
-              - "external"
-              - "pages"
-              - "unauthenticated"
-            max_in_flight: all
-        fail_fast: false
-        do:
-          - task: zap-scan
-            file: zap-runner/ci/tasks/zap-scan.yml
-            vars:
-              repo_name: ((repo_name))
-              runner_tag: ((runner_tag))
-            params:
-              TARGET_CONTEXT: ((.:context))
-              CREDHB_CRED: ((credentials))
-
-groups:
-  - name: default
-    jobs:
-      - set-self
-      - scan-all-contexts
+resource_types:
+  - name: registry-image
+    type: registry-image
+    source:
+      repository: registry-image-resource
+      tag: latest
 
 resources:
   - name: zap-runner
     type: git
     source:
-      uri: https://github.com/cloud-gov/((repo_name))
+      uri: https://github.com/cloud-gov/zap-runner
       branch: main
-      commit_verification_keys: ((cloud-gov-pgp-keys))
+      # If you require signed commits:
+      # commit_verification_keys: ((cloud-gov-pgp-keys))
 
-resource_types:
-  - name: registry-image
-    type: registry-image
+  # Schedule: every day at 1:00 AM America/New_York
+  - name: daily-1am-et
+    type: time
     source:
-      aws_access_key_id: ((ecr_aws_key))
-      aws_secret_access_key: ((ecr_aws_secret))
-      repository: registry-image-resource
-      aws_region: us-gov-west-1
-      tag: latest
+      location: America/New_York
+      start: 1:00 AM
+      stop: 1:10 AM
+      days: [Monday, Tuesday, Wednesday, Thursday, Friday, Saturday, Sunday]
 
-  - name: git
-    type: registry-image
+  # Optional: push tarballs to S3
+  - name: results-bucket
+    type: s3
     source:
-      aws_access_key_id: ((ecr_aws_key))
-      aws_secret_access_key: ((ecr_aws_secret))
-      repository: git-resource
-      aws_region: us-gov-west-1
-      tag: latest
+      bucket: ((results_bucket))
+      regexp: zap-reports/(.*)
+      region_name: us-gov-west-1
+      access_key_id: ((ecr_aws_key))
+      secret_access_key: ((ecr_aws_secret))
 
-  - name: time
-    type: registry-image
-    source:
-      aws_access_key_id: ((ecr_aws_key))
-      aws_secret_access_key: ((ecr_aws_secret))
-      repository: time-resource
-      aws_region: us-gov-west-1
-      tag: latest
+jobs:
+  # Self-managing pipeline
+  - name: set-self
+    plan:
+      - get: zap-runner
+        trigger: true
+      - set_pipeline: zap-scanner
+        file: zap-runner/ci/pipeline.yml
+        var_files:
+          - zap-runner/ci/config.yml
+          - zap-runner/ci/vars/zap-dast.yml
+
+  # Run every day at 1AM ET across contexts
+  - name: daily-dast
+    plan:
+      - get: daily-1am-et
+        trigger: true
+      - get: zap-runner
+        passed: [set-self]
+      - across:
+          - var: context
+            values:
+              [
+                "internal",
+                "external",
+                "cloud-gov-pages",
+                "unauthenticated",
+                "api",
+              ]
+            max_in_flight: all
+        do:
+          # Acquire auth via CredHub-backed variables (header injection)
+          - task: acquire-auth-token
+            file: zap-runner/ci/tasks/acquire-auth.yml
+            vars: { context: ((.:context)) }
+            params:
+              AUTH_SOURCE: ((zap.auth_source.((.:context)) "cf"))
+              # CF path: aligns with zap-scan-user guidance (passwords from CredHub)
+              CF_API: ((zap.cf.((.:context)).api))
+              CF_USER: ((zap.cf.((.:context)).user)) # "zap-scan-user"
+              CF_PASS: ((zap.cf.((.:context)).pass)) # from CredHub
+              # Or OpsUAA owner-token if preferred for a given context
+              OPSUAA_HOST: ((zap.opsuaa.host))
+              OPSUAA_CLIENT_ID: ((zap.opsuaa.client_id))
+              OPSUAA_CLIENT_SECRET: ((zap.opsuaa.client_secret))
+              OPSUAA_USER: ((zap.opsuaa.user))
+              OPSUAA_PASS: ((zap.opsuaa.pass))
+              # Static bearer (fallback for testing only)
+              STATIC_BEARER: ((zap.static_bearer.((.:context))?))
+
+          # ZAP AF scan (per-site XMLs + global excludes + central UA + OpenAPI)
+          - task: zap-af
+            file: zap-runner/ci/tasks/zap-af.yml
+            vars: { context: ((.:context)), runner_tag: ((runner_tag)) }
+            params:
+              SCAN_CONTEXT: ((.:context))
+              AUTH_TOKEN_FILE: auth/token.txt
+              USER_AGENT: ((user_agent))
+              EXCLUDES_FILE: zap-runner/ci/common/global-exclusions.txt
+              # Optional: enforce org defaults here
+              SPIDER_MAX_DEPTH: ((zap.defaults.spider_max_depth "5"))
+              MAX_SCAN_DURATION: ((zap.defaults.max_scan_duration "0"))
+              ALERT_THRESHOLD: ((zap.defaults.alert_threshold "MEDIUM"))
+
+          # Push a tiny summary (optionally expand later)
+          - task: process-results
+            file: zap-runner/ci/tasks/process-results.yml
+            params:
+              SCAN_CONTEXT: ((.:context))
+              SLACK_WEBHOOK: ((slack_webhook))
+              ALERT_THRESHOLD: ((zap.threshold.((.:context)) "MEDIUM"))
+
+          # Upload XMLs to DefectDojo (duplicate-safe reimports)
+          - task: push-defectdojo
+            file: zap-runner/ci/tasks/push-defectdojo.yml
+            params:
+              DEFECTDOJO_URL: ((defectdojo.url ""))
+              DEFECTDOJO_API_KEY: ((defectdojo.api_key ""))
+              PRODUCT_ID: ((defectdojo.product_id "0"))
+              ENGAGEMENT_ID: ((defectdojo.engagement_id "0"))
+              ENVIRONMENT: ((defectdojo.environment "Production"))
+              TEST_TITLE_PREFIX: ((defectdojo.test_title_prefix "ZAP"))
+              MINIMUM_SEVERITY: ((defectdojo.minimum_severity "Low"))
+              ACTIVE: ((defectdojo.active "true"))
+              VERIFIED: ((defectdojo.verified "false"))
+              CLOSE_OLD_FINDINGS: ((defectdojo.close_old "false"))
+              SKIP_DUPLICATES: ((defectdojo.skip_dupes "true"))
+
+          # Archive tarball externally
+          - put: results-bucket
+            params:
+              file: zap-reports/*.tar.gz

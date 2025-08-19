@@ -1,0 +1,35 @@
+# Central report settings used by the Automation Framework "report" jobs.
+# See: ZAP Report Generation + AF support and templates.
+# - https://www.zaproxy.org/docs/desktop/addons/report-generation/             (about & API)
+# - https://www.zaproxy.org/docs/desktop/addons/automation-framework/job-report-generation/  (AF)
+# - https://www.zaproxy.org/docs/desktop/addons/report-generation/templates/   (templates)
+
+# Which templates to emit per site. Order matters for readability in artifacts.
+templates:
+  - id: traditional-html
+    extension: html
+  - id: traditional-json
+    extension: json
+  - id: traditional-xml
+    extension: xml
+  - id: sarif-json
+    extension: sarif.json
+
+# Filter which risks and confidences appear in reports.
+# Valid risks: info, low, medium, high
+# Valid confidences: falsepositive, low, medium, high, confirmed
+filters:
+  risks: [high, medium, low]
+  confidences: [confirmed, high]
+
+# Cosmetic/metadata options applied where supported by the Report add-on:
+metadata:
+  include_description: false
+  include_header: true
+  include_alpha_beta_alerts: false
+  # You can set report_title_prefix; the task adds context + host + timestamp.
+  report_title_prefix: "ZAP Scan"
+# Optional: extra template properties (advanced users)
+# properties:
+#   modern.theme: "dark"
+#   traditional.report.hideTables: "false"

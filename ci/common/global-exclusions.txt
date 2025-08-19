@@ -1,0 +1,18 @@
+# Regular expressions understood by ZAP "exclude from proxy" / global exclusions.
+# See: https://www.zaproxy.org/docs/desktop/start/features/global-exclusions/
+# Add or remove as needed; these help reduce noise and avoid external vendor assets.
+
+^https?://.*\.mozilla\.com(/|$)
+^https?://.*\.mozilla\.net(/|$)
+^https?://.*\.mozilla\.org(/|$)
+^https?://.*\.firefox\.com(/|$)
+^https?://.*\.getpocket\.com(/|$)
+^https?://.*\.cloudflare-dns\.com(/|$)
+^https?://.*\.digitalgov\.gov(/|$)
+^https?://.*\.elastic\.co(/|$)
+^https?://.*\.grafana\.com(/|$)
+^https?://.*\.jsdelivr\.net(/|$)
+^https?://.*\.secureauth\.gsa\.gov(/|$)
+
+# Example: health endpoints you do not want to scan
+# ^https?://.*/(health|status)(/|$)

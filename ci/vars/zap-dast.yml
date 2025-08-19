@@ -1,0 +1,38 @@
+# ci/vars/zap-dast.yml
+team: main
+runner_tag: "latest"
+results_bucket: ((zap.results_bucket))
+slack_webhook: ((zap.slack_webhook))
+cloud-gov-pgp-keys: ((cloud-gov-pgp-keys))
+
+# Centralized User-Agent for all scans (can override per pipeline if needed)
+user_agent: "cloud-gov-zap-runner/1.0 (+security@cloud.gov)"
+
+# Org defaults for AF knobs
+zap:
+  defaults:
+    spider_max_depth: 5
+    max_scan_duration: 0
+    alert_threshold: MEDIUM
+
+  # Per-context auth source (cf | opsuaa | static | none)
+  auth_source:
+    internal: cf
+    external: cf
+    cloud-gov-pages: cf
+    unauthenticated: none
+    api: cf
+
+# DefectDojo configuration (expected to come from CredHub/var files)
+defectdojo:
+  url: ((dojo.url))
+  api_key: ((dojo.api_token))
+  product_id: ((dojo.product_id))
+  engagement_id: ((dojo.engagement_id))
+  minimum_severity: ((dojo.minimum_severity "Low"))
+  active: ((dojo.active "true"))
+  verified: ((dojo.verified "false"))
+  close_old: ((dojo.close_old "false"))
+  skip_dupes: ((dojo.skip_dupes "true"))
+  environment: ((dojo.environment "Production"))
+  test_title_prefix: ((dojo.test_title_prefix "ZAP"))

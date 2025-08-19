@@ -1,3 +1,4 @@
-# API endpoints
-https://api.cloud.gov/v3
-https://api.fr.cloud.gov/v3
+# API base URLs (optional; used if fallback behavior requires)
+https://api.example.gov/v1/users
+https://api.example.gov/v1/orders
+https://api.example.gov/v1/inventory

@@ -1,0 +1,22 @@
+# Example AF fragment to show where extra jobs would slot if a team needs them.
+# NOTE: Central reporting, user-agent, and global exclusions are managed by:
+#   - ci/common/reporting.yml
+#   - ci/common/user-agent.txt
+#   - ci/common/global-exclusions.txt
+# The task (ci/tasks/zap-af.yml) injects addOns/options/replacer/report/exitStatus for you.
+
+# Teams typically only need to supply:
+#   - urls.txt (required)
+#   - config.yml (optional per-context SPA/API depth/duration thresholds)
+#   - openapi.json (optional; if present for API contexts, we can add an OpenAPI job)
+
+# If you later want OpenAPI per-context, add the job BEFORE spider/activeScan in a
+# context-specific variant of the task, for example:
+#
+# jobs:
+#   - type: openapi
+#     parameters:
+#       apiFile: "/zap/wrk/openapi.json"
+#       targetUrl: "https://api.example.gov"
+#
+# See: https://www.zaproxy.org/docs/desktop/addons/openapi/automation-framework/
