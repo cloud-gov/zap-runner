@@ -1,0 +1,16 @@
+# API scanning configuration for multiple OpenAPI-based APIs
+AUTH_TYPE: header # Use header-based auth (via CredHub token)
+SCAN_TYPE: api # Indicates OpenAPI-style API scanning
+SPIDER_MAX_DEPTH: 2
+MAX_SCAN_DURATION: 45
+ALERT_THRESHOLD: MEDIUM
+# If you want to enforce a particular base URL override,
+# uncomment and adjust:
+# target_override: "https://api.example.gov"
+
+# Example mapping file names to target URLs, if needed (optional)
+# openapi_specs:
+#   - file: "openapi-users.json"
+#     target: "https://api.example.gov/v1/users"
+#   - file: "openapi-orders.json"
+#     target: "https://api.example.gov/v1/orders"

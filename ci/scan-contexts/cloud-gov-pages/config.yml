@@ -1,0 +1,11 @@
+# Cloud.gov Pages configuration
+AUTH_TYPE: form
+AUTH_LOGIN_URL: https://pages.cloud.gov/auth/login
+SCAN_TYPE: full
+SPIDER_MAX_DEPTH: 8
+MAX_SCAN_DURATION: 90
+ALERT_THRESHOLD: MEDIUM
+
+# Pages-specific settings
+INCLUDE_SUBDOMAINS: true
+SCAN_PREVIEW_SITES: false

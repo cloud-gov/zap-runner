@@ -1,0 +1,2 @@
+https://login.fr.cloud.gov
+https://idp.fr.cloud.gov

@@ -1,0 +1,82 @@
+# ci/tasks/push-defectdojo.yml
+platform: linux
+image_resource:
+  type: registry-image
+  source:
+    repository: ((repo_name)) # run on your hardened base-derived runner
+    tag: ((runner_tag))
+
+inputs:
+  - name: zap-reports
+
+params:
+  DEFECTDOJO_URL: # e.g., https://dojo.example.com
+  DEFECTDOJO_API_KEY: # API v2 key
+  PRODUCT_ID: # numeric product id
+  ENGAGEMENT_ID: # numeric engagement id
+  ENVIRONMENT: "Production"
+  TEST_TITLE_PREFIX: "ZAP"
+  MINIMUM_SEVERITY: "Low"
+  ACTIVE: "true"
+  VERIFIED: "false"
+  CLOSE_OLD_FINDINGS: "false"
+  SKIP_DUPLICATES: "true" # ensure reimports don't create dupes
+
+run:
+  path: bash
+  args:
+    - -euo
+    - pipefail
+    - -c
+    - |
+      set -euo pipefail
+
+      if [ -z "${DEFECTDOJO_URL:-}" ] || [ -z "${DEFECTDOJO_API_KEY:-}" ] || [ -z "${ENGAGEMENT_ID:-}" ]; then
+        echo "Missing DEFECTDOJO_URL / DEFECTDOJO_API_KEY / ENGAGEMENT_ID"
+        exit 1
+      fi
+
+      mkdir -p /tmp/zr
+      tar -C /tmp/zr -xzf zap-reports/*.tar.gz || true
+
+      shopt -s nullglob
+      XMLS=( /tmp/zr/*/zap-*.xml /tmp/zr/zap-*.xml )
+      if [ ${#XMLS[@]} -eq 0 ]; then
+        echo "No zap-*.xml reports to upload."
+        exit 0
+      fi
+
+      API="${DEFECTDOJO_URL%/}/api/v2/import-scan/"
+      AUTH="Authorization: Token ${DEFECTDOJO_API_KEY}"
+
+      for f in "${XMLS[@]}"; do
+        base="$(basename "$f")"
+        host="${base#zap-}"; host="${host%.xml}"
+        test_title="${TEST_TITLE_PREFIX} ${host}"
+
+        echo "→ Uploading ${base} to DefectDojo as test '${test_title}'"
+        http_code=$(
+          curl -s -o /tmp/dd.out -w '%{http_code}' \
+            -H "$AUTH" \
+            -F "file=@${f};type=text/xml" \
+            -F "scan_type=ZAP Scan" \
+            -F "product_id=${PRODUCT_ID:-0}" \
+            -F "engagement=${ENGAGEMENT_ID}" \
+            -F "environment=${ENVIRONMENT}" \
+            -F "close_old_findings=${CLOSE_OLD_FINDINGS}" \
+            -F "skip_duplicates=${SKIP_DUPLICATES}" \
+            -F "minimum_severity=${MINIMUM_SEVERITY}" \
+            -F "active=${ACTIVE}" \
+            -F "verified=${VERIFIED}" \
+            -F "scan_date=$(date +%F)" \
+            -F "test_title=${test_title}" \
+            "$API"
+        )
+
+        if [ "$http_code" -lt 200 ] || [ "$http_code" -ge 300 ]; then
+          echo "DefectDojo upload failed (${http_code})"
+          sed -n '1,200p' /tmp/dd.out || true
+          exit 1
+        fi
+        echo "✓ Uploaded (${http_code})"
+      done

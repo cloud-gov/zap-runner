@@ -1,0 +1,10 @@
+# Example team configuration
+AUTH_TYPE: oauth2  # or: form, header, api-key, none
+SCAN_TYPE: full    # or: baseline, api
+SPIDER_MAX_DEPTH: 10
+MAX_SCAN_DURATION: 90
+ALERT_THRESHOLD: MEDIUM  # or: HIGH, LOW
+
+# Team-specific settings
+CUSTOM_HEADER: X-Team-Header
+RATE_LIMIT: 20

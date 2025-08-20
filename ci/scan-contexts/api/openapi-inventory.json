@@ -1,0 +1,45 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "Inventory API",
+    "version": "1.0.0",
+    "description": "Inventory management endpoints"
+  },
+  "servers": [{ "url": "https://api.example.gov/v1/inventory" }],
+  "paths": {
+    "/inventory": {
+      "get": {
+        "summary": "Get inventory levels",
+        "responses": {
+          "200": {
+            "description": "Inventory data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/Item" }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Item": {
+        "type": "object",
+        "properties": {
+          "sku": { "type": "string" },
+          "count": { "type": "integer" }
+        }
+      }
+    }
+  }
+}

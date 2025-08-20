@@ -1,0 +1,11 @@
+# Internal applications configuration
+AUTH_TYPE: oauth2
+AUTH_LOGIN_URL: https://auth.internal.cloud.gov/login
+SCAN_TYPE: full
+SPIDER_MAX_DEPTH: 10
+MAX_SCAN_DURATION: 120
+ALERT_THRESHOLD: HIGH
+
+# Additional internal-specific settings
+VERIFY_SSL: true
+FOLLOW_REDIRECTS: true

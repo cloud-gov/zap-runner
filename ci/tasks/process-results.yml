@@ -1,0 +1,180 @@
+# ci/tasks/process-results.yml
+platform: linux
+image_resource:
+  type: registry-image
+  source:
+    repository: ((repo_name))
+    tag: ((runner_tag))
+
+inputs:
+  - name: zap-runner
+  - name: zap-reports
+
+outputs:
+  - name: processed-results
+
+params:
+  SCAN_CONTEXT:
+  ALERT_THRESHOLD: MEDIUM
+  SLACK_WEBHOOK_URL:
+  DEFECTDOJO_URL:
+  
+run:
+  path: bash
+  args:
+    - -euo
+    - pipefail
+    - -c
+    - |
+      set -euo pipefail
+      
+      echo "Processing ZAP scan results for context: ${SCAN_CONTEXT}"
+      
+      # Extract and analyze reports
+      cd zap-reports
+      latest_report=$(ls -t *.tar.gz | head -1)
+      
+      if [ -z "$latest_report" ]; then
+        echo "No report archives found!"
+        exit 1
+      fi
+      
+      # Extract the report archive
+      tar -xzf "$latest_report"
+      
+      # Count findings by severity
+      HIGH_COUNT=0
+      MEDIUM_COUNT=0
+      LOW_COUNT=0
+      INFO_COUNT=0
+      
+      # Parse XML reports for finding counts
+      for xml_file in */zap-*.xml; do
+        if [ -f "$xml_file" ]; then
+          echo "Analyzing: $xml_file"
+          
+          # Use Python to parse XML (PyYAML and python3 are available in the runner)
+          python3 - "$xml_file" <<'PYTHON'
+      import sys
+      import xml.etree.ElementTree as ET
+      
+      tree = ET.parse(sys.argv[1])
+      root = tree.getroot()
+      
+      high = 0
+      medium = 0
+      low = 0
+      info = 0
+      
+      for alert in root.findall('.//alertitem'):
+          risk = alert.find('riskcode')
+          if risk is not None:
+              risk_level = int(risk.text)
+              if risk_level == 3:
+                  high += 1
+              elif risk_level == 2:
+                  medium += 1
+              elif risk_level == 1:
+                  low += 1
+              elif risk_level == 0:
+                  info += 1
+      
+      print(f"HIGH:{high}")
+      print(f"MEDIUM:{medium}")
+      print(f"LOW:{low}")
+      print(f"INFO:{info}")
+      PYTHON
+        fi
+      done > ../processed-results/summary.txt
+      
+      # Read the summary
+      cd ../processed-results
+      if [ -f summary.txt ]; then
+        while IFS=: read -r level count; do
+          case "$level" in
+            HIGH) HIGH_COUNT=$((HIGH_COUNT + count)) ;;
+            MEDIUM) MEDIUM_COUNT=$((MEDIUM_COUNT + count)) ;;
+            LOW) LOW_COUNT=$((LOW_COUNT + count)) ;;
+            INFO) INFO_COUNT=$((INFO_COUNT + count)) ;;
+          esac
+        done < summary.txt
+      fi
+      
+      # Create summary report
+      cat > scan-summary.json <<EOF
+      {
+        "context": "${SCAN_CONTEXT}",
+        "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+        "findings": {
+          "high": ${HIGH_COUNT},
+          "medium": ${MEDIUM_COUNT},
+          "low": ${LOW_COUNT},
+          "info": ${INFO_COUNT}
+        },
+        "alert_triggered": false
+      }
+      EOF
+      
+      # Check if we need to trigger alerts
+      ALERT_TRIGGERED=false
+      case "${ALERT_THRESHOLD}" in
+        HIGH)
+          if [ $HIGH_COUNT -gt 0 ]; then
+            ALERT_TRIGGERED=true
+          fi
+          ;;
+        MEDIUM)
+          if [ $HIGH_COUNT -gt 0 ] || [ $MEDIUM_COUNT -gt 0 ]; then
+            ALERT_TRIGGERED=true
+          fi
+          ;;
+        LOW)
+          if [ $HIGH_COUNT -gt 0 ] || [ $MEDIUM_COUNT -gt 0 ] || [ $LOW_COUNT -gt 0 ]; then
+            ALERT_TRIGGERED=true
+          fi
+          ;;
+      esac
+      
+      # Update alert status in summary
+      if [ "$ALERT_TRIGGERED" = "true" ]; then
+        sed -i 's/"alert_triggered": false/"alert_triggered": true/' scan-summary.json
+        echo "⚠️ Alert threshold reached! Found issues at or above ${ALERT_THRESHOLD} severity"
+        
+        # Send Slack notification if webhook is configured
+        if [ -n "${SLACK_WEBHOOK_URL:-}" ]; then
+          echo "Sending Slack notification..."
+          
+          MESSAGE="🔍 *ZAP Scan Alert*\n"
+          MESSAGE="${MESSAGE}Context: \`${SCAN_CONTEXT}\`\n"
+          MESSAGE="${MESSAGE}Threshold: ${ALERT_THRESHOLD}\n"
+          MESSAGE="${MESSAGE}Findings:\n"
+          MESSAGE="${MESSAGE}  • High: ${HIGH_COUNT}\n"
+          MESSAGE="${MESSAGE}  • Medium: ${MEDIUM_COUNT}\n"
+          MESSAGE="${MESSAGE}  • Low: ${LOW_COUNT}\n"
+          MESSAGE="${MESSAGE}  • Info: ${INFO_COUNT}\n"
+          
+          if [ -n "${DEFECTDOJO_URL:-}" ]; then
+            MESSAGE="${MESSAGE}\nView in DefectDojo: ${DEFECTDOJO_URL}"
+          fi
+          
+          curl -X POST "${SLACK_WEBHOOK_URL}" \
+            -H 'Content-Type: application/json' \
+            -d "{\"text\": \"${MESSAGE}\"}" || echo "Slack notification failed"
+        fi
+      else
+        echo "✅ No issues found at or above ${ALERT_THRESHOLD} severity"
+      fi
+      
+      # Display summary
+      echo ""
+      echo "================================"
+      echo "Scan Summary for ${SCAN_CONTEXT}"
+      echo "================================"
+      echo "High Risk:   ${HIGH_COUNT}"
+      echo "Medium Risk: ${MEDIUM_COUNT}"
+      echo "Low Risk:    ${LOW_COUNT}"
+      echo "Info:        ${INFO_COUNT}"
+      echo "================================"
+      
+      # Store detailed results for downstream tasks
+      cp ../zap-reports/*.tar.gz . 2>/dev/null || true

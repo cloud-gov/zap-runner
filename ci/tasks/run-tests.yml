@@ -1,0 +1,106 @@
+# ci/tasks/run-tests.yml
+# Concourse task to run the comprehensive test suite
+platform: linux
+image_resource:
+  type: registry-image
+  source:
+    repository: ubuntu
+    tag: 22.04
+
+inputs:
+  - name: zap-runner
+
+outputs:
+  - name: test-results
+
+params:
+  SKIP_DOCKER_BUILD: true  # Docker build will be handled separately
+
+run:
+  path: bash
+  args:
+    - -euo
+    - pipefail
+    - -c
+    - |
+      set -euo pipefail
+      
+      # Install dependencies
+      apt-get update && apt-get install -y \
+        jq \
+        yamllint \
+        python3 \
+        python3-yaml \
+        curl \
+        git
+      
+      # Navigate to repo
+      cd zap-runner
+      
+      # Create test results directory
+      mkdir -p ../test-results
+      
+      echo "========================================="
+      echo " Running ZAP Runner Test Suite"
+      echo "========================================="
+      echo ""
+      
+      # Run all test scripts
+      cd tests
+      
+      # Track test results
+      TOTAL_TESTS=0
+      PASSED_TESTS=0
+      FAILED_TESTS=0
+      TEST_RESULTS="../../../test-results/test-summary.txt"
+      
+      # Function to run a test and track results
+      run_test() {
+        local test_name="$1"
+        local test_script="$2"
+        
+        echo "Running: $test_name"
+        TOTAL_TESTS=$((TOTAL_TESTS + 1))
+        
+        if ./"$test_script"; then
+          echo "✅ PASSED: $test_name" | tee -a "$TEST_RESULTS"
+          PASSED_TESTS=$((PASSED_TESTS + 1))
+        else
+          echo "❌ FAILED: $test_name" | tee -a "$TEST_RESULTS"
+          FAILED_TESTS=$((FAILED_TESTS + 1))
+        fi
+        echo ""
+      }
+      
+      # Run individual test suites
+      run_test "Project Structure Verification" "verify-project-structure.sh"
+      run_test "Scan Context Validation" "validate-scan-contexts.sh"
+      run_test "ZAP Configuration Tests" "test-zap-config.sh"
+      run_test "Documented Commands Validation" "test-documented-commands.sh"
+      
+      # Generate test report
+      echo "=========================================" | tee -a "$TEST_RESULTS"
+      echo " Test Suite Summary" | tee -a "$TEST_RESULTS"
+      echo "=========================================" | tee -a "$TEST_RESULTS"
+      echo "Total Tests: $TOTAL_TESTS" | tee -a "$TEST_RESULTS"
+      echo "Passed: $PASSED_TESTS" | tee -a "$TEST_RESULTS"
+      echo "Failed: $FAILED_TESTS" | tee -a "$TEST_RESULTS"
+      echo "" | tee -a "$TEST_RESULTS"
+      
+      if [ "$FAILED_TESTS" -gt 0 ]; then
+        echo "❌ Test suite FAILED" | tee -a "$TEST_RESULTS"
+        exit 1
+      else
+        echo "✅ All tests PASSED" | tee -a "$TEST_RESULTS"
+      fi
+      
+      # Generate JSON report for downstream processing
+      cat > ../../../test-results/test-results.json <<EOF
+      {
+        "timestamp": "$(date -Iseconds)",
+        "total": $TOTAL_TESTS,
+        "passed": $PASSED_TESTS,
+        "failed": $FAILED_TESTS,
+        "status": $([ "$FAILED_TESTS" -eq 0 ] && echo '"success"' || echo '"failure"')
+      }
+      EOF

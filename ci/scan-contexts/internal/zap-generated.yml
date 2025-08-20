@@ -1,0 +1,87 @@
+env:
+  contexts:
+  - name: cloud.gov internal conmon
+    urls:
+    - https://alertmanager.fr.cloud.gov
+    - https://ci.fr.cloud.gov
+    - https://grafana.fr.cloud.gov
+    - https://logs-platform.fr.cloud.gov
+    - https://opslogin.fr.cloud.gov
+    - https://prometheus.fr.cloud.gov
+    - https://doomsday.fr.cloud.gov
+    includePaths:
+    - https://alertmanager.fr.cloud.gov.*
+    - https://ci.fr.cloud.gov.*
+    - https://grafana.fr.cloud.gov.*
+    - https://logs-platform.fr.cloud.gov.*
+    - https://opslogin.fr.cloud.gov.*
+    - https://prometheus.fr.cloud.gov.*
+    - https://doomsday.fr.cloud.gov.*
+    excludePaths:
+    - mozilla\.com
+    - mozilla\.net
+    - mozilla\.org
+    - firefox\.com
+    - getpocket\.com
+    - cloudflare-dns\.com
+    - digitalgov\.gov
+    - elastic\.co
+    - grafana\.com
+    - jsdelivr\.net
+    - secureauth\.gsa\.gov
+    authentication:
+      verification:
+        method: response
+        pollFrequency: 60
+        pollUnits: requests
+        pollUrl: ""
+        pollPostData: ""
+    sessionManagement:
+      method: cookie
+    technology:
+      exclude:
+      - C
+      - Windows
+      - ASP
+      - MacOS
+      - Apache
+      - IBM DB2
+      - PHP
+      - CouchDB
+      - MariaDB
+      - Microsoft SQL Server
+      - Oracle
+      - Firebird
+      - MongoDB
+      - HypersonicSQL
+      - MySQL
+      - SAP MaxDB
+      - SVN
+      - IIS
+      - Microsoft Access
+      - Sybase
+    structure: {}
+  parameters: {}
+jobs:
+- type: import
+  parameters:
+    type: url
+    fileName: /Users/williamjzujkowski/git/zap-runner/ci/scan-contexts/internal/urls.txt
+- type: spider
+  parameters: {}
+  tests:
+  - name: At least 100 URLs found
+    type: stats
+    onFail: INFO
+    statistic: automation.spider.urls.added
+    operator: '>='
+    value: 100
+- type: activeScan
+  parameters: {}
+  policyDefinition: {}
+- type: report
+  parameters:
+    reportTitle: 2025-05-23-ZAP-Report-Internal
+- type: exitStatus
+  parameters: {}
+

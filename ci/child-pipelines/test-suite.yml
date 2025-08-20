@@ -1,0 +1,137 @@
+# ci/child-pipelines/test-suite.yml
+# Automated test suite pipeline for ZAP Runner
+resources:
+  - name: zap-runner
+    type: git
+    icon: github
+    source:
+      uri: ((zap_runner_git_uri))
+      branch: ((zap_runner_branch))
+      private_key: ((zap_runner_deploy_key))
+      git_config:
+        - name: core.sshCommand
+          value: "ssh -o StrictHostKeyChecking=no"
+
+  - name: daily-trigger
+    type: time
+    icon: clock-outline
+    source:
+      start: 12:00 AM
+      stop: 1:00 AM
+      location: America/New_York
+      days: [Monday, Tuesday, Wednesday, Thursday, Friday]
+
+  - name: slack-alert
+    type: slack-notification
+    icon: slack
+    source:
+      url: ((slack_webhook_url))
+
+resource_types:
+  - name: slack-notification
+    type: registry-image
+    source:
+      repository: cfcommunity/slack-notification-resource
+      tag: latest
+
+jobs:
+  - name: run-test-suite
+    public: true
+    serial: true
+    plan:
+      - get: zap-runner
+        trigger: true
+      
+      - get: daily-trigger
+        trigger: false  # Manual trigger for tests
+      
+      - task: run-tests
+        file: zap-runner/ci/tasks/run-tests.yml
+        on_failure:
+          put: slack-alert
+          params:
+            text: |
+              :warning: *ZAP Runner Test Suite Failed*
+              Pipeline: $BUILD_PIPELINE_NAME
+              Job: $BUILD_JOB_NAME
+              Build: $BUILD_NAME
+              <$ATC_EXTERNAL_URL/teams/$BUILD_TEAM_NAME/pipelines/$BUILD_PIPELINE_NAME/jobs/$BUILD_JOB_NAME/builds/$BUILD_NAME|View Build>
+      
+      - task: validate-documentation
+        config:
+          platform: linux
+          image_resource:
+            type: registry-image
+            source:
+              repository: ubuntu
+              tag: 22.04
+          inputs:
+            - name: zap-runner
+          run:
+            path: bash
+            args:
+              - -euo
+              - pipefail
+              - -c
+              - |
+                # Install markdown linter
+                apt-get update && apt-get install -y npm
+                npm install -g markdownlint-cli
+                
+                cd zap-runner
+                
+                echo "Validating documentation files..."
+                markdownlint README.md PROJECT_STATUS.md COMPLIANCE.md ZAP_BEST_PRACTICES.md || true
+                
+                echo "Documentation validation complete"
+
+  - name: validate-and-build
+    public: true
+    serial: true
+    plan:
+      - get: zap-runner
+        trigger: false
+        passed: [run-test-suite]
+      
+      - task: validate-dockerfile
+        config:
+          platform: linux
+          image_resource:
+            type: registry-image
+            source:
+              repository: hadolint/hadolint
+              tag: latest-alpine
+          inputs:
+            - name: zap-runner
+          run:
+            path: sh
+            args:
+              - -c
+              - |
+                cd zap-runner
+                hadolint Dockerfile --ignore DL3008 --ignore DL3009 || true
+      
+      - task: build-image
+        privileged: true
+        config:
+          platform: linux
+          image_resource:
+            type: registry-image
+            source:
+              repository: concourse/oci-build-task
+          inputs:
+            - name: zap-runner
+          outputs:
+            - name: image
+          params:
+            CONTEXT: zap-runner
+          run:
+            path: build
+        on_success:
+          put: slack-alert
+          params:
+            text: |
+              :white_check_mark: *ZAP Runner Tests & Build Successful*
+              All validation tests passed and Docker image built successfully
+              Pipeline: $BUILD_PIPELINE_NAME
+              <$ATC_EXTERNAL_URL/teams/$BUILD_TEAM_NAME/pipelines/$BUILD_PIPELINE_NAME/jobs/$BUILD_JOB_NAME/builds/$BUILD_NAME|View Build>

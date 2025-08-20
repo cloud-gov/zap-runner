@@ -1,0 +1,60 @@
+# ci/tasks/export-metrics.yml
+# Export ZAP scan metrics in Prometheus format for Grafana
+platform: linux
+image_resource:
+  type: registry-image
+  source:
+    repository: python
+    tag: 3.11-slim
+
+inputs:
+  - name: zap-runner
+  - name: zap-reports
+
+outputs:
+  - name: metrics
+
+params:
+  SCAN_CONTEXT:
+
+run:
+  path: bash
+  args:
+    - -euo
+    - pipefail
+    - -c
+    - |
+      set -euo pipefail
+      
+      # Install dependencies
+      pip install pyyaml prometheus-client
+      
+      # Extract reports if they're in tarball format
+      if ls zap-reports/*.tar.gz >/dev/null 2>&1; then
+        mkdir -p /tmp/reports
+        tar -xzf zap-reports/*.tar.gz -C /tmp/reports
+        REPORTS_DIR="/tmp/reports"
+      else
+        REPORTS_DIR="zap-reports"
+      fi
+      
+      # Run metrics collector
+      python3 zap-runner/ci/scripts/collect-metrics.py \
+        --results-dir "$REPORTS_DIR" \
+        --output-dir metrics \
+        --format prometheus
+      
+      # Add timestamp and context labels
+      TIMESTAMP=$(date +%s)
+      echo "# HELP zap_scan_last_run_timestamp Unix timestamp of last scan" >> metrics/metrics.prom
+      echo "# TYPE zap_scan_last_run_timestamp gauge" >> metrics/metrics.prom
+      echo "zap_scan_last_run_timestamp $TIMESTAMP" >> metrics/metrics.prom
+      
+      # Add context label to all metrics
+      if [ -n "${SCAN_CONTEXT:-}" ]; then
+        sed -i "s/}}/,context=\"${SCAN_CONTEXT}\"}}/g" metrics/metrics.prom
+        sed -i "s/ \([0-9]\)/ {context=\"${SCAN_CONTEXT}\"} \1/g" metrics/metrics.prom
+      fi
+      
+      echo "Metrics exported to metrics/metrics.prom"
+      cat metrics/metrics.prom

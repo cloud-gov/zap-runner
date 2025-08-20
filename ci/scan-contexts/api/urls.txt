@@ -1,0 +1,4 @@
+# API base URLs (optional; used if fallback behavior requires)
+https://api.example.gov/v1/users
+https://api.example.gov/v1/orders
+https://api.example.gov/v1/inventory

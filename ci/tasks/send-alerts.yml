@@ -1,0 +1,274 @@
+# ci/tasks/send-alerts.yml
+# Enhanced Slack alerting with configurable thresholds
+platform: linux
+image_resource:
+  type: registry-image
+  source:
+    repository: python
+    tag: 3.11-slim
+
+inputs:
+  - name: zap-runner
+  - name: metrics
+
+params:
+  SLACK_WEBHOOK_URL:
+  SCAN_CONTEXT:
+  HIGH_THRESHOLD: 0      # Alert if high risk > this value
+  MEDIUM_THRESHOLD: 10   # Alert if medium risk > this value
+  LOW_THRESHOLD: 50      # Alert if low risk > this value
+  ALERT_CHANNEL: "#security-alerts"
+  MENTION_USERS: ""      # Optional: "@security-team" for critical alerts
+
+run:
+  path: bash
+  args:
+    - -euo
+    - pipefail
+    - -c
+    - |
+      set -euo pipefail
+      
+      # Install dependencies
+      pip install requests pyyaml
+      
+      # Python script to process metrics and send alerts
+      python3 - <<'PYTHON'
+      import json
+      import requests
+      import os
+      import sys
+      from datetime import datetime
+      
+      def parse_prometheus_metrics(file_path):
+          """Parse Prometheus format metrics file."""
+          metrics = {}
+          with open(file_path, 'r') as f:
+              for line in f:
+                  if line.startswith('#') or not line.strip():
+                      continue
+                  parts = line.split()
+                  if len(parts) >= 2:
+                      metric_name = parts[0].split('{')[0]
+                      value = float(parts[-1])
+                      metrics[metric_name] = value
+          return metrics
+      
+      def load_json_metrics(file_path):
+          """Load JSON format metrics if available."""
+          try:
+              with open(file_path, 'r') as f:
+                  return json.load(f)
+          except FileNotFoundError:
+              return {}
+      
+      def determine_severity(metrics, thresholds):
+          """Determine alert severity based on thresholds."""
+          high = metrics.get('zap_scan_high_risk_count', 0)
+          medium = metrics.get('zap_scan_medium_risk_count', 0)
+          low = metrics.get('zap_scan_low_risk_count', 0)
+          
+          if high > thresholds['high']:
+              return 'critical', f"High risk: {high}"
+          elif medium > thresholds['medium']:
+              return 'warning', f"Medium risk: {medium}"
+          elif low > thresholds['low']:
+              return 'info', f"Low risk: {low}"
+          else:
+              return 'success', "All checks passed"
+      
+      def format_slack_message(metrics, json_metrics, context, severity, reason):
+          """Format Slack message with metrics."""
+          emoji = {
+              'critical': '🚨',
+              'warning': '⚠️',
+              'info': 'ℹ️',
+              'success': '✅'
+          }
+          
+          color = {
+              'critical': 'danger',
+              'warning': 'warning',
+              'info': '#36a64f',
+              'success': 'good'
+          }
+          
+          high = int(metrics.get('zap_scan_high_risk_count', 0))
+          medium = int(metrics.get('zap_scan_medium_risk_count', 0))
+          low = int(metrics.get('zap_scan_low_risk_count', 0))
+          info = int(metrics.get('zap_scan_info_count', 0))
+          urls = int(metrics.get('zap_scan_total_urls', 0))
+          unique = int(metrics.get('zap_scan_unique_vulnerabilities', 0))
+          duration = metrics.get('zap_scan_duration_seconds', 0)
+          
+          # Calculate security score
+          total_issues = high + medium + low
+          if total_issues > 0:
+              security_score = int((1 - (high / total_issues)) * 100)
+          else:
+              security_score = 100
+          
+          # Format duration
+          duration_min = int(duration / 60)
+          duration_sec = int(duration % 60)
+          
+          # Build message
+          title = f"{emoji[severity]} ZAP Security Scan Alert - {context.upper()}"
+          
+          # Mentions for critical alerts
+          mention = ""
+          if severity == 'critical' and os.environ.get('MENTION_USERS'):
+              mention = f" {os.environ['MENTION_USERS']}"
+          
+          attachments = [{
+              "color": color[severity],
+              "title": title,
+              "text": f"{reason}{mention}",
+              "fields": [
+                  {
+                      "title": "🔴 High Risk",
+                      "value": str(high),
+                      "short": True
+                  },
+                  {
+                      "title": "🟡 Medium Risk",
+                      "value": str(medium),
+                      "short": True
+                  },
+                  {
+                      "title": "🔵 Low Risk",
+                      "value": str(low),
+                      "short": True
+                  },
+                  {
+                      "title": "ℹ️ Informational",
+                      "value": str(info),
+                      "short": True
+                  },
+                  {
+                      "title": "🌐 URLs Scanned",
+                      "value": str(urls),
+                      "short": True
+                  },
+                  {
+                      "title": "🔍 Unique Issues",
+                      "value": str(unique),
+                      "short": True
+                  },
+                  {
+                      "title": "⏱️ Scan Duration",
+                      "value": f"{duration_min}m {duration_sec}s",
+                      "short": True
+                  },
+                  {
+                      "title": "📊 Security Score",
+                      "value": f"{security_score}%",
+                      "short": True
+                  }
+              ],
+              "footer": "ZAP Runner",
+              "footer_icon": "https://www.zaproxy.org/img/favicon.ico",
+              "ts": int(datetime.now().timestamp())
+          }]
+          
+          # Add action buttons for critical/warning
+          if severity in ['critical', 'warning']:
+              attachments[0]["actions"] = [
+                  {
+                      "type": "button",
+                      "text": "View in DefectDojo",
+                      "url": os.environ.get('DEFECTDOJO_URL', '#'),
+                      "style": "primary"
+                  },
+                  {
+                      "type": "button",
+                      "text": "View Dashboard",
+                      "url": os.environ.get('GRAFANA_DASHBOARD_URL', '#')
+                  }
+              ]
+          
+          # Add context details if available from JSON metrics
+          if json_metrics and 'contexts' in json_metrics:
+              ctx_data = json_metrics['contexts'].get(context, {})
+              if ctx_data:
+                  risk_dist = ctx_data.get('risk_distribution', {})
+                  if risk_dist:
+                      details = "Risk Distribution: " + ", ".join([f"{k}: {v}" for k, v in risk_dist.items()])
+                      attachments[0]["fields"].append({
+                          "title": "Context Details",
+                          "value": details,
+                          "short": False
+                      })
+          
+          return {
+              "channel": os.environ.get('ALERT_CHANNEL', '#security-alerts'),
+              "username": "ZAP Security Scanner",
+              "icon_emoji": ":shield:",
+              "attachments": attachments
+          }
+      
+      def send_to_slack(webhook_url, message):
+          """Send message to Slack."""
+          response = requests.post(webhook_url, json=message)
+          if response.status_code != 200:
+              print(f"Failed to send Slack message: {response.status_code}")
+              print(response.text)
+              return False
+          return True
+      
+      def main():
+          # Load configuration
+          webhook_url = os.environ.get('SLACK_WEBHOOK_URL')
+          if not webhook_url:
+              print("SLACK_WEBHOOK_URL not set, skipping alerts")
+              return 0
+          
+          context = os.environ.get('SCAN_CONTEXT', 'unknown')
+          thresholds = {
+              'high': int(os.environ.get('HIGH_THRESHOLD', '0')),
+              'medium': int(os.environ.get('MEDIUM_THRESHOLD', '10')),
+              'low': int(os.environ.get('LOW_THRESHOLD', '50'))
+          }
+          
+          # Load metrics
+          metrics = {}
+          json_metrics = {}
+          
+          if os.path.exists('metrics/metrics.prom'):
+              metrics = parse_prometheus_metrics('metrics/metrics.prom')
+          
+          if os.path.exists('metrics/metrics.json'):
+              json_metrics = load_json_metrics('metrics/metrics.json')
+          
+          if not metrics and not json_metrics:
+              print("No metrics found, skipping alerts")
+              return 0
+          
+          # Determine if we should alert
+          severity, reason = determine_severity(metrics, thresholds)
+          
+          # Always send summary for critical/warning, optionally for others
+          if severity in ['critical', 'warning'] or os.environ.get('ALWAYS_ALERT') == 'true':
+              message = format_slack_message(metrics, json_metrics, context, severity, reason)
+              
+              if send_to_slack(webhook_url, message):
+                  print(f"Alert sent to Slack: {severity} - {reason}")
+              else:
+                  print("Failed to send Slack alert")
+                  return 1
+          else:
+              print(f"No alert needed: {severity} - {reason}")
+          
+          # Log summary to console
+          print("\n=== Scan Summary ===")
+          print(f"Context: {context}")
+          print(f"High Risk: {int(metrics.get('zap_scan_high_risk_count', 0))}")
+          print(f"Medium Risk: {int(metrics.get('zap_scan_medium_risk_count', 0))}")
+          print(f"Low Risk: {int(metrics.get('zap_scan_low_risk_count', 0))}")
+          print(f"Status: {severity} - {reason}")
+          
+          return 0
+      
+      if __name__ == "__main__":
+          sys.exit(main())
+      PYTHON

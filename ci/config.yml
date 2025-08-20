@@ -1,4 +1,3 @@
-# ci/config.yml
 ---
 repo_name: zap-runner
 runner_tag: "latest"

@@ -1,0 +1,3 @@
+# Example team URLs - replace with your actual URLs
+https://app1.team.cloud.gov
+https://app2.team.cloud.gov
