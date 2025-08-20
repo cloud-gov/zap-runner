@@ -51,8 +51,6 @@ cd tests && ./final-validation.sh
 - 🧪 **Validation Suite** — 40+ preconfigured checks
 - 📈 **Metrics & Dashboards** — Grafana, Prometheus, and Slack alerts
 
-**Customer Responsibility**: Use these outputs to validate your **system boundary** in the SSP and track remediation of application-owned vulnerabilities.
-
 ---
 
 ## Architecture
@@ -88,8 +86,6 @@ cf:
     user: zap-scan-user
     pass: ((zap-scan-password))
 ```
-
-**Customer Responsibility**: Ensure credentials stored in CredHub are **rotated, scoped, and properly managed**.
 
 ---
 
@@ -160,8 +156,6 @@ fly -t main set-pipeline \
 - **Never commit secrets** to repo
 - Require **GPG-signed commits**
 - Follow **Cloud.gov FedRAMP Moderate** security requirements
-
-**Customer Responsibility**: Review **COMPLIANCE.md** for NIST SP 800-53 mappings and update your SSP with inherited vs. shared responsibilities.
 
 ---
 
