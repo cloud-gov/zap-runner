@@ -169,7 +169,7 @@ fly -t main set-pipeline \
 
 ## Documentation & References
 
-- [ZAP_BEST_PRACTICES.md](ZAP_BEST_PRACTICES.md) — AF best practices
+- [ZAP_BEST_PRACTICES.md](./docs/ZAP_BEST_PRACTICES.md) — AF best practices
 - [COMPLIANCE.md](COMPLIANCE.md) — FedRAMP/NIST control mappings
 - [tests/README.md](tests/README.md) — Test suite docs
 - [SECURITY.md](SECURITY.md) — Security policy
