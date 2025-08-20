@@ -5,8 +5,6 @@
 
 ZAP Runner is a containerized **OWASP ZAP** automation framework for **Cloud.gov infrastructure**, providing **continuous Dynamic Application Security Testing (DAST)**. It integrates directly with **DefectDojo** for vulnerability management and is fully deployable in **Concourse pipelines**.
 
-**Customer Responsibility**: While Cloud.gov provides FedRAMP Moderate controls, you are responsible for reviewing and acting on application-specific findings produced by ZAP Runner. This includes fixing vulnerabilities in your code, APIs, and endpoints.
-
 ---
 
 ## Overview
