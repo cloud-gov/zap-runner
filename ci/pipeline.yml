@@ -61,8 +61,8 @@ jobs:
   # Run every day at 1AM ET across contexts
   - name: daily-dast
     plan:
-      - get: daily-1am-et
-        trigger: false
+      # - get: daily-1am-et
+      #   trigger: true
       - get: zap-runner
         passed: [set-self]
       - across:
