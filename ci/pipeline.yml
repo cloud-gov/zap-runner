@@ -62,7 +62,7 @@ jobs:
   - name: daily-dast
     plan:
       - get: daily-1am-et
-        trigger: true
+        trigger: false
       - get: zap-runner
         passed: [set-self]
       - across:

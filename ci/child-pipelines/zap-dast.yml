@@ -29,7 +29,7 @@ jobs:
     plan:
       # Schedule gate: emits once per day in the window above; triggers job.
       - get: daily-1am
-        trigger: false
+        trigger: true
 
       - get: zap-runner
         trigger: false
