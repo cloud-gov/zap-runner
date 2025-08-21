@@ -24,15 +24,6 @@ resources:
       branch: main
       commit_verification_keys: ((cloud-gov-pgp-keys))
 
-  - name: results-bucket
-    type: s3
-    source:
-      bucket: ((results_bucket))
-      regexp: zap-reports/(.*)
-      region_name: us-gov-west-1
-      access_key_id: ((ecr_aws_key))
-      secret_access_key: ((ecr_aws_secret))
-
 jobs:
   - name: dast-scan-all
     plan:
@@ -112,8 +103,3 @@ jobs:
               MENTION_USERS: ((slack_mention_critical ""))
               DEFECTDOJO_URL: ((defectdojo.url ""))
               GRAFANA_DASHBOARD_URL: ((grafana_dashboard_url ""))
-
-          # Store the full artifact bundle
-          - put: results-bucket
-            params:
-              file: zap-reports/*.tar.gz

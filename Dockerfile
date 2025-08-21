@@ -1,5 +1,6 @@
 # syntax=docker/dockerfile:1.4
 ARG base_image
+
 ARG ZAP_VERSION=latest
 
 ################################################################################
