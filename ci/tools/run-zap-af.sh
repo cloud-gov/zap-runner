@@ -1,0 +1,188 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Required env from task params
+: "${SCAN_CONTEXT:?SCAN_CONTEXT not set}"
+: "${AUTH_TOKEN_FILE:?AUTH_TOKEN_FILE not set}"
+
+WORK=/zap/wrk
+OUT="${WORK}/out"
+mkdir -p "${WORK}" "${OUT}" zap-reports
+
+# --- Inputs
+ctx_dir="zap-runner/ci/scan-contexts/${SCAN_CONTEXT}"
+cp "${ctx_dir}/urls.txt" "${WORK}/urls.txt"
+cp "${ctx_dir}/config.yml" "${WORK}/config.yml" || true
+
+# Central knobs
+UA_FILE="zap-runner/ci/common/user-agent.txt"
+EXC_FILE="zap-runner/ci/common/global-exclusions.txt"
+REPORTING_YAML="zap-runner/ci/common/reporting.yml"
+
+# Parse reporting.yml to craft AF report jobs (via python+PyYAML present in runner)
+python3 - "$REPORTING_YAML" > "${WORK}/reporting.json" << 'PY'
+import sys, yaml, json
+with open(sys.argv[1]) as f:
+    cfg = yaml.safe_load(f)
+# shape:
+# { templates: [{id, extension}], filters:{risks,confidences}, metadata:{...}, properties:{...}? }
+print(json.dumps(cfg))
+PY
+
+TOKEN="$(cat "${AUTH_TOKEN_FILE}" || true)"
+
+# Collect user-agent & exclusions
+USER_AGENT="$(tr -d '\n' < "$UA_FILE" 2>/dev/null || true)"
+
+# Build YAML list block for excludePaths
+EXC_BLOCK=""
+if [ -s "$EXC_FILE" ]; then
+  EXC_BLOCK="excludePaths:"
+  while IFS= read -r line; do
+    # skip comments/empty
+    if [ -z "${line}" ] || [[ "${line}" =~ ^[[:space:]]*# ]]; then continue; fi
+    EXC_BLOCK="${EXC_BLOCK}\n  - \"${line}\""
+  done < "$EXC_FILE"
+fi
+
+# Token replacer rule only if token supplied
+REPLACER_RULE=""
+if [ -s "${AUTH_TOKEN_FILE}" ] && [ -n "${TOKEN}" ]; then
+  REPLACER_RULE=$(cat <<'EOF'
+  - type: replacer
+    parameters:
+      rules:
+        - description: "Auth header"
+          enabled: true
+          matchType: "REQ_HEADER"
+          matchString: "Authorization"
+          replacement: __TOKEN__
+          matchRegex: false
+EOF
+)
+  # escape for sed safely
+  esc_token="$(printf '%s' "$TOKEN" | sed 's/[&/\]/\\&/g')"
+  REPLACER_RULE="${REPLACER_RULE/__TOKEN__/${esc_token}}"
+fi
+
+# Ensure per-URL scanning; each URL gets its own folder & reports.
+mapfile -t URLS < <(grep -E -v '^\s*#' "${WORK}/urls.txt" | grep -E '.')
+TS="$(date +%Y%m%d-%H%M%S)"
+
+# Stash report template configs as tiny JSON files
+python3 - "$WORK" << 'PY'
+import json, sys, os
+wrk = sys.argv[1]
+cfg = json.load(open(os.path.join(wrk,'reporting.json')))
+risks = cfg.get('filters',{}).get('risks',[])
+confs = cfg.get('filters',{}).get('confidences',[])
+meta  = cfg.get('metadata',{})
+props = cfg.get('properties',{})
+for t in cfg.get('templates', []):
+    out = {
+      'template': t['id'],
+      'extension': t['extension'],
+      'risks': risks,
+      'confidences': confs,
+      'meta': meta,
+      'properties': props
+    }
+    with open(os.path.join(wrk, f"tpl-{t['id']}.json"), "w") as f:
+        json.dump(out, f)
+PY
+
+for url in "${URLS[@]}"; do
+  host="$(echo "$url" | sed -E 's#https?://##;s#/.*##')"
+  this_out="${OUT}/${host}"
+  mkdir -p "${this_out}"
+
+  # Build AF plan for this host
+  PLAN="${WORK}/plan-${host}.yaml"
+  : > "$PLAN"
+
+  # Start AF plan with env and jobs sections
+  # Note: addOns job is not required here; add-ons handled at image build.
+  cat >> "$PLAN" <<'YAML'
+env: {}
+jobs:
+YAML
+
+  # 1) options: set userAgent + global excludePaths
+  # https://www.zaproxy.org/docs/desktop/addons/automation-framework/options/
+  echo "  - type: options" >> "$PLAN"
+  echo "    parameters:" >> "$PLAN"
+  if [ -n "${USER_AGENT:-}" ]; then
+    echo "      userAgent: \"${USER_AGENT}\"" >> "$PLAN"
+  fi
+  if [ -n "${EXC_BLOCK}" ]; then
+    # indent EXC_BLOCK under parameters:
+    echo "${EXC_BLOCK}" | sed 's/^/      /' >> "$PLAN"
+  fi
+
+  # 2) optional: replacer for Authorization header (if token available)
+  if [ -n "${REPLACER_RULE}" ]; then
+    echo "${REPLACER_RULE}" >> "$PLAN"
+  fi
+
+  # 3) import URLs (single)
+  cat >> "$PLAN" <<YAML
+  - type: import
+    parameters:
+      type: url
+      fileName: /zap/wrk/url-${host}.txt
+YAML
+
+  # 4) spider + activeScan (contextless per-host crawl/scan)
+  cat >> "$PLAN" <<'YAML'
+  - type: spider
+    parameters:
+      maxDepth: ${SPIDER_MAX_DEPTH:-5}
+
+  - type: activeScan
+    parameters:
+      policy: "Default Policy"
+      maxScanDurationInMins: ${MAX_SCAN_DURATION:-0}
+YAML
+
+  # 5) Per-template report jobs from central config
+  for tpl_json in "${WORK}"/tpl-*.json; do
+    [ -e "$tpl_json" ] || continue
+    tpl_id="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["template"])' "$tpl_json")"
+    ext="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["extension"])' "$tpl_json")"
+    risks="$(python3 -c 'import json,sys;print(",".join(json.load(open(sys.argv[1]))["risks"]))' "$tpl_json")"
+    confs="$(python3 -c 'import json,sys;print(",".join(json.load(open(sys.argv[1]))["confidences"]))' "$tpl_json")"
+
+    title_prefix="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["meta"].get("report_title_prefix","ZAP Scan"))' "$tpl_json")"
+    report_title="${title_prefix} ${SCAN_CONTEXT} ${host} ${TS}"
+
+    cat >> "$PLAN" <<YAML
+  - type: report
+    parameters:
+      template: "${tpl_id}"
+      reportDir: "/zap/wrk/out/${host}"
+      reportFile: "zap-${host}.${ext}"
+      displayReport: false
+      reportTitle: "${report_title}"
+      risks: [${risks}]
+      confidences: [${confs}]
+YAML
+  done
+
+  # 6) Exit with thresholds aligned to common MEDIUM/HIGH gate
+  cat >> "$PLAN" <<'YAML'
+  - type: exitStatus
+    parameters:
+      warnLevel: "MEDIUM"
+      errorLevel: "HIGH"
+YAML
+
+  # Hydrate per-host URL file & run
+  printf '%s\n' "${url}" > "${WORK}/url-${host}.txt"
+
+  echo "→ Running AF for ${url}"
+  /zap/zap.sh -cmd -autorun "${PLAN}"
+done
+
+# Package all outputs for downstream steps (push-defectdojo etc.)
+TS="$(date +%Y%m%d-%H%M%S)"
+tar -C "${OUT}" -czf "zap-reports/${SCAN_CONTEXT}-${TS}.tar.gz" .
