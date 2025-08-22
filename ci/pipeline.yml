@@ -103,7 +103,7 @@ jobs:
               {
                 context: ((.:context)),
                 runner_tag: ((runner_tag)),
-                repository: ((repo_name)),
+                repo_name: ((repo_name)),
               }
             params:
               SCAN_CONTEXT: ((.:context))
