@@ -99,7 +99,12 @@ jobs:
           # ZAP AF scan (per-site XMLs + global excludes + central UA + OpenAPI)
           - task: zap-af
             file: zap-runner/ci/tasks/zap-af.yml
-            vars: { context: ((.:context)), runner_tag: ((runner_tag)) }
+            vars:
+              {
+                context: ((.:context)),
+                runner_tag: ((runner_tag)),
+                repository: ((repo_name)),
+              }
             params:
               SCAN_CONTEXT: ((.:context))
               AUTH_TOKEN_FILE: auth/token.txt
