@@ -1,26 +1,30 @@
 # ci/tasks/zap-af.yml
 platform: linux
+
 image_resource:
   type: registry-image
   source:
-    repository: ((repo_name))   # built FROM ${base_image}
+    repository: ((repo_name))
     tag: ((runner_tag))
+
 inputs:
   - name: zap-runner
   - name: auth
+
 outputs:
   - name: zap-reports
+
 params:
-  SCAN_CONTEXT:
-  AUTH_TOKEN_FILE:
+  SCAN_CONTEXT: ""
+  AUTH_TOKEN_FILE: ""
+
 run:
   path: bash
   args:
-    - -euo
-    - pipefail
-    - -c
+    - -lc
     - |
-      set -euo pipefail
+      set -Eeuo pipefail
+
       WORK=/zap/wrk
       OUT="${WORK}/out"
       mkdir -p "${WORK}" "${OUT}" zap-reports
@@ -35,20 +39,19 @@ run:
       EXC_FILE="zap-runner/ci/common/global-exclusions.txt"
       REPORTING_YAML="zap-runner/ci/common/reporting.yml"
 
-      # Parse reporting.yml to craft AF report jobs (via python+PyYAML present in runner)
+      # Parse reporting.yml to JSON for easy reuse
       python3 - "$REPORTING_YAML" > "${WORK}/reporting.json" << 'PY'
       import sys, yaml, json
       with open(sys.argv[1]) as f:
           cfg = yaml.safe_load(f)
-      # shape:
-      # { templates: [{id, extension}], filters:{risks,confidences}, metadata:{...}, properties:{...}? }
       print(json.dumps(cfg))
       PY
 
-      TOKEN="$(cat "${AUTH_TOKEN_FILE}" || true)"
+      TOKEN="$(cat "${AUTH_TOKEN_FILE}" 2>/dev/null || true)"
 
       # Collect user-agent & exclusions
       USER_AGENT="$(tr -d '\n' < "$UA_FILE" 2>/dev/null || true)"
+
       # Build YAML list block for excludePaths
       EXC_BLOCK=""
       if [ -s "$EXC_FILE" ]; then
@@ -62,8 +65,9 @@ run:
 
       # Token replacer rule only if token supplied
       REPLACER_RULE=""
-      if [ -s "${AUTH_TOKEN_FILE}" ]; then
-        REPLACER_RULE=$(cat <<'EOF'
+      if [ -s "${AUTH_TOKEN_FILE}" ] && [ -n "${TOKEN}" ]; then
+        esc_token="$(printf '%s' "$TOKEN" | sed 's/[&/\]/\\&/g')"
+        read -r -d '' REPLACER_RULE <<EOF || true
   - type: replacer
     parameters:
       rules:
@@ -71,20 +75,21 @@ run:
           enabled: true
           matchType: "REQ_HEADER"
           matchString: "Authorization"
-          replacement: __TOKEN__
+          replacement: ${esc_token}
           matchRegex: false
 EOF
-)
-        REPLACER_RULE="${REPLACER_RULE/__TOKEN__/$(printf '%s' "$TOKEN" | sed 's/[&/\]/\\&/g')}"
       fi
 
       # Ensure per-URL scanning; each URL gets its own folder & reports.
-      mapfile -t URLS < <(grep -E -v '^\s*#' "${WORK}/urls.txt" | grep -E '.')
+      mapfile -t URLS < <(grep -E -v '^\s*#' "${WORK}/urls.txt" | grep -E '.' || true)
+      if [ ${#URLS[@]} -eq 0 ]; then
+        echo "No URLs found in ${WORK}/urls.txt" >&2
+        exit 1
+      fi
+
       TS="$(date +%Y%m%d-%H%M%S)"
 
-      # Read reporting config
-      REPORT_TEMPLATES=$(python3 -c 'import json;print(",".join([t["id"] for t in json.load(open("'"${WORK}/reporting.json"'"))["templates"]]))')
-      # Build report jobs dynamically with risks/confidences and filenames
+      # Build per-template config JSONs from reporting.json
       python3 - "$WORK" << 'PY'
       import json, sys, os
       wrk = sys.argv[1]
@@ -93,7 +98,6 @@ EOF
       confs = cfg.get('filters',{}).get('confidences',[])
       meta  = cfg.get('metadata',{})
       props = cfg.get('properties',{})
-      # stash as small JSON files per template for the shell to use later
       for t in cfg.get('templates', []):
           out = {
             'template': t['id'],
@@ -112,26 +116,26 @@ EOF
         this_out="${OUT}/${host}"
         mkdir -p "${this_out}"
 
-        # Build AF plan for this host
         PLAN="${WORK}/plan-${host}.yaml"
         : > "$PLAN"
 
         # Start AF plan with env and jobs sections
-        # Note: addOns job is deprecated - add-ons are now installed at build time in Dockerfile
+        # (Add-ons are installed in the image; we don't use the addOns job)
         cat >> "$PLAN" <<'YAML'
 env: {}
 jobs:
 YAML
 
         # 1) options: set userAgent + global excludePaths
-        # https://www.zaproxy.org/docs/desktop/addons/automation-framework/options/
-        echo "  - type: options" >> "$PLAN"
-        echo "    parameters:" >> "$PLAN"
-        [ -n "${USER_AGENT:-}" ] && echo "      userAgent: \"${USER_AGENT}\"" >> "$PLAN"
-        if [ -n "${EXC_BLOCK}" ]; then
-          # indent EXC_BLOCK under parameters:
-          echo "${EXC_BLOCK}" | sed 's/^/      /' >> "$PLAN"
-        fi
+        {
+          echo "  - type: options"
+          echo "    parameters:"
+          [ -n "${USER_AGENT:-}" ] && printf '      userAgent: "%s"\n' "${USER_AGENT}"
+          if [ -n "${EXC_BLOCK}" ]; then
+            # indent EXC_BLOCK under parameters:
+            echo "${EXC_BLOCK}" | sed 's/^/      /'
+          fi
+        } >> "$PLAN"
 
         # 2) optional: replacer for Authorization header (if token available)
         if [ -n "${REPLACER_RULE}" ]; then
@@ -146,7 +150,7 @@ YAML
       fileName: /zap/wrk/url-${host}.txt
 YAML
 
-        # 4) spider + activeScan (contextless per-host crawl/scan)
+        # 4) spider + activeScan
         cat >> "$PLAN" <<'YAML'
   - type: spider
     parameters:
@@ -165,7 +169,6 @@ YAML
           ext="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["extension"])' "$tpl_json")"
           risks="$(python3 -c 'import json,sys;print(",".join(json.load(open(sys.argv[1]))["risks"]))' "$tpl_json")"
           confs="$(python3 -c 'import json,sys;print(",".join(json.load(open(sys.argv[1]))["confidences"]))' "$tpl_json")"
-
           title_prefix="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["meta"].get("report_title_prefix","ZAP Scan"))' "$tpl_json")"
           report_title="${title_prefix} ${SCAN_CONTEXT} ${host} ${TS}"
 
@@ -182,7 +185,7 @@ YAML
 YAML
         done
 
-        # 6) Exit with thresholds aligned to common MEDIUM/HIGH gate
+        # 6) Exit thresholds
         cat >> "$PLAN" <<'YAML'
   - type: exitStatus
     parameters:
@@ -197,6 +200,6 @@ YAML
         /zap/zap.sh -cmd -autorun "${PLAN}"
       done
 
-      # Package all outputs for downstream steps (push-defectdojo etc.)
+      # Package all outputs for downstream steps
       TS="$(date +%Y%m%d-%H%M%S)"
       tar -C "${OUT}" -czf "zap-reports/${SCAN_CONTEXT}-${TS}.tar.gz" .
