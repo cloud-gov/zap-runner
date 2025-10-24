@@ -41,7 +41,7 @@ if [ -s "$EXC_FILE" ]; then
   while IFS= read -r line; do
     # skip comments/empty
     if [ -z "${line}" ] || [[ "${line}" =~ ^[[:space:]]*# ]]; then continue; fi
-    EXC_BLOCK="${EXC_BLOCK}  - \"${line}\""
+    EXC_BLOCK="${EXC_BLOCK}\n  - \"${line}\""
   done < "$EXC_FILE"
 fi
 
@@ -116,7 +116,7 @@ YAML
   fi
   if [ -n "${EXC_BLOCK}" ]; then
     # indent EXC_BLOCK under parameters:
-    echo "${EXC_BLOCK}" | sed 's/^/      /' >> "$PLAN"
+    echo -e "${EXC_BLOCK}" | sed 's/^/      /' >> "$PLAN"
   fi
 
   # 2) optional: replacer for Authorization header (if token available)
