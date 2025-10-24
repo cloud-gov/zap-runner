@@ -41,7 +41,7 @@ if [ -s "$EXC_FILE" ]; then
   while IFS= read -r line; do
     # skip comments/empty
     if [ -z "${line}" ] || [[ "${line}" =~ ^[[:space:]]*# ]]; then continue; fi
-    EXC_BLOCK="${EXC_BLOCK}\n  - \"${line}\""
+    EXC_BLOCK="${EXC_BLOCK}\n  - ${line}"
   done < "$EXC_FILE"
 fi
 
