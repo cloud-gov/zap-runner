@@ -10,7 +10,6 @@ image_resource:
     tag: ((runner_tag))
 
 inputs:
-  - name: auth
   - name: zap-runner
 
 outputs:
