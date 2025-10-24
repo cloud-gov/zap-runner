@@ -78,23 +78,23 @@ jobs:
             max_in_flight: all
         do:
           # Acquire auth via CredHub-backed variables (header injection)
-          # - task: acquire-auth-token
-          #   file: zap-runner/ci/tasks/acquire-auth.yml
-          #   vars: { context: ((.:context)) }
-          #   params:
-          #     AUTH_SOURCE: ((zap.auth_source.((.:context)) "cf"))
-          #     # CF path: aligns with zap-scan-user guidance (passwords from CredHub)
-          #     CF_API: ((zap.cf.((.:context)).api))
-          #     CF_USER: ((zap.cf.((.:context)).user)) # "zap-scan-user"
-          #     CF_PASS: ((zap.cf.((.:context)).pass)) # from CredHub
-          #     # Or OpsUAA owner-token if preferred for a given context
-          #     OPSUAA_HOST: ((zap.opsuaa.host))
-          #     OPSUAA_CLIENT_ID: ((zap.opsuaa.client_id))
-          #     OPSUAA_CLIENT_SECRET: ((zap.opsuaa.client_secret))
-          #     OPSUAA_USER: ((zap.opsuaa.user))
-          #     OPSUAA_PASS: ((zap.opsuaa.pass))
-          #     # Static bearer (fallback for testing only)
-          #     STATIC_BEARER: ((zap.static_bearer.((.:context))?))
+          - task: acquire-auth-token
+            file: zap-runner/ci/tasks/acquire-auth.yml
+            vars: { context: ((.:context)) }
+            params:
+              AUTH_SOURCE: ((zap.auth_source.((.:context)) "cf"))
+              # CF path: aligns with zap-scan-user guidance (passwords from CredHub)
+              CF_API: ((zap.cf.((.:context)).api))
+              CF_USER: ((zap.cf.((.:context)).user)) # "zap-scan-user"
+              CF_PASS: ((zap.cf.((.:context)).pass)) # from CredHub
+              # Or OpsUAA owner-token if preferred for a given context
+              OPSUAA_HOST: ((zap.opsuaa.host))
+              OPSUAA_CLIENT_ID: ((zap.opsuaa.client_id))
+              OPSUAA_CLIENT_SECRET: ((zap.opsuaa.client_secret))
+              OPSUAA_USER: ((zap.opsuaa.user))
+              OPSUAA_PASS: ((zap.opsuaa.pass))
+              # Static bearer (fallback for testing only)
+              STATIC_BEARER: ((zap.static_bearer.((.:context))?))
 
           # ZAP AF scan (per-site XMLs + global excludes + central UA + OpenAPI)
           - task: zap-af
