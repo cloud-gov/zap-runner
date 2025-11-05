@@ -137,12 +137,12 @@ YAML
   cat >> "$PLAN" <<'YAML'
   - type: spider
     parameters:
-      maxDepth: $SPIDER_MAX_DEPTH
+      maxDepth: 5
 
   - type: activeScan
     parameters:
       policy: "Default Policy"
-      maxScanDurationInMins: $MAX_SCAN_DURATION
+      maxScanDurationInMins: 10
 YAML
 
   # 5) Per-template report jobs from central config
