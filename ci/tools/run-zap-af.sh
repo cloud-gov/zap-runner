@@ -5,6 +5,7 @@ set -euo pipefail
 : "${SCAN_CONTEXT:?SCAN_CONTEXT not set}"
 : "${AUTH_TOKEN_FILE:?AUTH_TOKEN_FILE not set}"
 
+
 WORK=/zap/wrk
 OUT="${WORK}/out"
 mkdir -p "${WORK}" "${OUT}" zap-reports
@@ -13,6 +14,8 @@ mkdir -p "${WORK}" "${OUT}" zap-reports
 ctx_dir="zap-runner/ci/scan-contexts/${SCAN_CONTEXT}"
 cp "${ctx_dir}/urls.txt" "${WORK}/urls.txt"
 cp "${ctx_dir}/config.yml" "${WORK}/config.yml" || true
+
+source ${WORK}/config.yml
 
 # Central knobs
 UA_FILE="zap-runner/ci/common/user-agent.txt"
@@ -136,12 +139,12 @@ YAML
   cat >> "$PLAN" <<'YAML'
   - type: spider
     parameters:
-      maxDepth: ${SPIDER_MAX_DEPTH:-5}
+      maxDepth: $SPIDER_MAX_DEPTH
 
   - type: activeScan
     parameters:
       policy: "Default Policy"
-      maxScanDurationInMins: ${MAX_SCAN_DURATION:-0}
+      maxScanDurationInMins: $MAX_SCAN_DURATION
 YAML
 
   # 5) Per-template report jobs from central config

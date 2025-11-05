@@ -110,10 +110,6 @@ jobs:
               AUTH_TOKEN_FILE: auth/token.txt
               USER_AGENT: ((user_agent))
               EXCLUDES_FILE: zap-runner/ci/common/global-exclusions.txt
-              # Optional: enforce org defaults here
-              SPIDER_MAX_DEPTH: ((zap.defaults.spider_max_depth "5"))
-              MAX_SCAN_DURATION: ((zap.defaults.max_scan_duration "0"))
-              ALERT_THRESHOLD: ((zap.defaults.alert_threshold "MEDIUM"))
 
           # Push a tiny summary (optionally expand later)
           - task: process-results
