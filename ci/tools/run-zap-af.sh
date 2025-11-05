@@ -15,8 +15,6 @@ ctx_dir="zap-runner/ci/scan-contexts/${SCAN_CONTEXT}"
 cp "${ctx_dir}/urls.txt" "${WORK}/urls.txt"
 cp "${ctx_dir}/config.yml" "${WORK}/config.yml" || true
 
-source ${WORK}/config.yml
-
 # Central knobs
 UA_FILE="zap-runner/ci/common/user-agent.txt"
 EXC_FILE="zap-runner/ci/common/global-exclusions.txt"
