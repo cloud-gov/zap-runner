@@ -41,19 +41,26 @@ WORKDIR /zap
 COPY --from=zap-builder /zap /zap
 
 # Core tooling: Python, curl, jq, etc.
-RUN apt-get update &&     apt-get install -y --no-install-recommends       ca-certificates curl gnupg       openjdk-21-jre-headless xvfb unzip jq git       python3-pip python-is-python3 python3-yaml python3-requests python3-websocket       build-essential ruby-full &&     pip3 install --no-cache-dir zaproxy PyYAML &&     rm -rf /var/lib/apt/lists/*
+RUN apt-get update &&     apt-get install -y --no-install-recommends       ca-certificates curl gnupg       openjdk-21-jre-headless xvfb unzip jq git       python3-pip python-is-python3 python3-yaml python3-requests python3-websocket       build-essential &&     pip3 install --no-cache-dir zaproxy PyYAML &&     rm -rf /var/lib/apt/lists/*
 
 # --- Install Cloud Foundry CLI v8 (official apt repo) ---
 # Ref: CF CLI v8 Debian/Ubuntu instructions
 # Add key + repo, then install cf8-cli
 RUN set -e;     apt-get update && apt-get install -y --no-install-recommends ca-certificates curl gnupg &&     install -d -m 0755 /usr/share/keyrings &&     curl -fsSL https://packages.cloudfoundry.org/debian/cli.cloudfoundry.org.key |       gpg --dearmor -o /usr/share/keyrings/cloudfoundry-keyring.gpg &&     echo "deb [signed-by=/usr/share/keyrings/cloudfoundry-keyring.gpg] https://packages.cloudfoundry.org/debian stable main"       > /etc/apt/sources.list.d/cloudfoundry-cli.list &&     apt-get update && apt-get install -y --no-install-recommends cf8-cli &&     rm -rf /var/lib/apt/lists/*
 
+# Install Ruby from source
+ENV RUBY_RELEASE_VERSION=3.4.7
+RUN wget -q "https://cache.ruby-lang.org/pub/ruby/3.4/ruby-${RUBY_RELEASE_VERSION}.tar.gz"
+RUN tar xaf "ruby-${RUBY_RELEASE_VERSION}.tar.gz"
+RUN cd ruby-${RUBY_RELEASE_VERSION} && \
+  ./configure -q && \
+  make -s -j $(nproc) && \
+  make -s install
+RUN rm -f "ruby-${RUBY_RELEASE_VERSION}.tar.gz" && rm -rf "ruby-${RUBY_RELEASE_VERSION}"
+
 # --- Install UAAC (cf-uaac Ruby gem) ---
 # Ref: UAAC docs: gem install cf-uaac
 RUN gem install --no-document cf-uaac
-
-# Update all ruby gems and cleanup old versions
-RUN gem update && gem cleanup
 
 # Create non-root user
 RUN useradd -u 1000 -m -s /bin/bash zap && chown -R zap:zap /zap
