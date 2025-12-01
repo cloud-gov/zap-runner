@@ -41,7 +41,7 @@ WORKDIR /zap
 COPY --from=zap-builder /zap /zap
 
 # Core tooling: Python, curl, jq, etc.
-RUN apt-get update &&     apt-get install -y --no-install-recommends       ca-certificates curl gnupg       openjdk-21-jre-headless xvfb unzip jq git       python3-pip python-is-python3 python3-yaml python3-requests python3-websocket       build-essential wget &&     pip3 install --no-cache-dir zaproxy PyYAML &&     rm -rf /var/lib/apt/lists/*
+RUN apt-get update &&     apt-get install -y --no-install-recommends       ca-certificates curl gnupg       openjdk-21-jre-headless xvfb unzip jq git       python3-pip python-is-python3 python3-yaml python3-requests python3-websocket       build-essential wget libssl-dev zlib1g-dev libyaml-dev &&     pip3 install --no-cache-dir zaproxy PyYAML &&     rm -rf /var/lib/apt/lists/*
 
 # --- Install Cloud Foundry CLI v8 (official apt repo) ---
 # Ref: CF CLI v8 Debian/Ubuntu instructions
