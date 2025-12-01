@@ -48,9 +48,6 @@ RUN apt-get update &&     apt-get install -y --no-install-recommends       ca-ce
 # Add key + repo, then install cf8-cli
 RUN set -e;     apt-get update && apt-get install -y --no-install-recommends ca-certificates curl gnupg &&     install -d -m 0755 /usr/share/keyrings &&     curl -fsSL https://packages.cloudfoundry.org/debian/cli.cloudfoundry.org.key |       gpg --dearmor -o /usr/share/keyrings/cloudfoundry-keyring.gpg &&     echo "deb [signed-by=/usr/share/keyrings/cloudfoundry-keyring.gpg] https://packages.cloudfoundry.org/debian stable main"       > /etc/apt/sources.list.d/cloudfoundry-cli.list &&     apt-get update && apt-get install -y --no-install-recommends cf8-cli &&     rm -rf /var/lib/apt/lists/*
 
-# Update the gems package manager
-RUN gem update --system
-
 # --- Install UAAC (cf-uaac Ruby gem) ---
 # Ref: UAAC docs: gem install cf-uaac
 RUN gem install --no-document cf-uaac
