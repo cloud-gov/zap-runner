@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.4
 ARG base_image
-ARG ZAP_IMAGE=zaproxy/zap-stable:stable
+ARG ZAP_IMAGE=zaproxy/zap-stable:latest
 ARG CF_CLI_VERSION=8.13.0
 
 ################################################################################
