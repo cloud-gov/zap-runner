@@ -32,7 +32,7 @@ resources:
     type: git
     source:
       uri: https://github.com/cloud-gov/((repo_name))
-      branch: 2026-03-18_update
+      branch: main
       commit_verification_keys: ((cloud-gov-pgp-keys))
 
   - name: scan-schedule

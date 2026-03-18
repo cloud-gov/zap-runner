@@ -10,7 +10,7 @@ image_resource:
     tag: ((runner_tag))
 
 inputs:
-  - name: ((repo_name))
+  - name: zap-runner
 
 outputs:
   - name: zap-report
@@ -38,7 +38,7 @@ run:
       set -o pipefail
       shopt -s inherit_errexit
 
-      repo_dir="((repo_name))"
+      repo_dir="zap-runner"
       targets_yml="${repo_dir}/${TARGETS_FILE}"
       work_root="/tmp/zap-report/${TARGET_CONTEXT}"
       state_root="/tmp/scan-state/${TARGET_CONTEXT}"
