@@ -1,0 +1,122 @@
+platform: linux
+
+image_resource:
+  type: registry-image
+  source:
+    aws_access_key_id: ((ecr_aws_key))
+    aws_secret_access_key: ((ecr_aws_secret))
+    repository: ((repo_name))
+    aws_region: ((aws_region))
+    tag: ((runner_tag))
+
+outputs:
+  - name: defectdojo-state
+    path: /tmp/defectdojo-state
+
+params:
+  TARGET_CONTEXT:
+  AWS_DEFAULT_REGION:
+  S3_BUCKET:
+  S3_PREFIX: zap
+  DEFECTDOJO_ENABLED: "true"
+  DEFECTDOJO_URL:
+  DEFECTDOJO_API_KEY:
+  DEFECTDOJO_VERIFY_SSL: "true"
+  DEFECTDOJO_SCAN_TYPE: "ZAP Scan"
+  DEFECTDOJO_MINIMUM_SEVERITY: "Info"
+  DEFECTDOJO_ACTIVE: "true"
+  DEFECTDOJO_VERIFIED: "true"
+  DEFECTDOJO_CLOSE_OLD_FINDINGS: "false"
+  DEFECTDOJO_AUTO_CREATE_CONTEXT: "true"
+
+run:
+  path: bash
+  args:
+    - -ceu
+    - |
+      set -o pipefail
+
+      if [[ "${DEFECTDOJO_ENABLED}" != "true" ]]; then
+        echo "DefectDojo import disabled"
+        exit 0
+      fi
+
+      if [[ -z "${DEFECTDOJO_URL}" || -z "${DEFECTDOJO_API_KEY}" ]]; then
+        echo "DefectDojo is enabled but DEFECTDOJO_URL or DEFECTDOJO_API_KEY is empty" >&2
+        exit 1
+      fi
+
+      manifest_s3_uri="s3://${S3_BUCKET}/${S3_PREFIX}/manifests/latest/${TARGET_CONTEXT}.json"
+      workdir="/tmp/defectdojo-state/${TARGET_CONTEXT}"
+      mkdir -p "${workdir}"
+
+      aws s3 cp "${manifest_s3_uri}" "${workdir}/manifest.json" --only-show-errors
+
+      verify_args=()
+      if [[ "${DEFECTDOJO_VERIFY_SSL}" != "true" ]]; then
+        verify_args+=(--insecure)
+      fi
+
+      python3 - <<'PY' "${workdir}/manifest.json" > "${workdir}/targets.jsonl"
+import json
+import sys
+
+with open(sys.argv[1], "r", encoding="utf-8") as f:
+    manifest = json.load(f)
+
+for target in manifest.get("targets", []):
+    if target.get("report_to_defectdojo"):
+        print(json.dumps(target, separators=(",", ":")))
+PY
+
+      if [[ ! -s "${workdir}/targets.jsonl" ]]; then
+        echo "No DefectDojo-importable targets found for context '${TARGET_CONTEXT}'"
+        exit 0
+      fi
+
+      while IFS= read -r target_json; do
+        name="$(jq -r '.name' <<<"${target_json}")"
+        xml_uri="$(jq -r '.xml_report_s3_uri' <<<"${target_json}")"
+
+        dojo_product_type_name="$(jq -r '.defectdojo.product_type_name // empty' <<<"${target_json}")"
+        dojo_product_name="$(jq -r '.defectdojo.product_name // empty' <<<"${target_json}")"
+        dojo_engagement_name="$(jq -r '.defectdojo.engagement_name // empty' <<<"${target_json}")"
+        dojo_test_title="$(jq -r '.defectdojo.test_title // empty' <<<"${target_json}")"
+        dojo_tags_csv="$(jq -r '(.defectdojo.tags // []) | join(",")' <<<"${target_json}")"
+
+        if [[ -z "${dojo_product_type_name}" || -z "${dojo_product_name}" || -z "${dojo_engagement_name}" ]]; then
+          echo "Skipping ${name}: DefectDojo metadata is incomplete"
+          continue
+        fi
+
+        target_dir="${workdir}/${name}"
+        mkdir -p "${target_dir}"
+        report_file="${target_dir}/${name}.xml"
+        response_file="${target_dir}/response.json"
+
+        aws s3 cp "${xml_uri}" "${report_file}" --only-show-errors
+
+        curl \
+          --silent \
+          --show-error \
+          --fail \
+          "${verify_args[@]}" \
+          -X POST \
+          -H "Authorization: Token ${DEFECTDOJO_API_KEY}" \
+          -F "scan_type=${DEFECTDOJO_SCAN_TYPE}" \
+          -F "minimum_severity=${DEFECTDOJO_MINIMUM_SEVERITY}" \
+          -F "active=${DEFECTDOJO_ACTIVE}" \
+          -F "verified=${DEFECTDOJO_VERIFIED}" \
+          -F "close_old_findings=${DEFECTDOJO_CLOSE_OLD_FINDINGS}" \
+          -F "auto_create_context=${DEFECTDOJO_AUTO_CREATE_CONTEXT}" \
+          -F "product_type_name=${dojo_product_type_name}" \
+          -F "product_name=${dojo_product_name}" \
+          -F "engagement_name=${dojo_engagement_name}" \
+          -F "test_title=${dojo_test_title}" \
+          -F "tags=${dojo_tags_csv}" \
+          -F "file=@${report_file};type=application/xml" \
+          "${DEFECTDOJO_URL%/}/api/v2/reimport-scan/" \
+          > "${response_file}"
+
+        echo "Imported ${name} into DefectDojo"
+      done < "${workdir}/targets.jsonl"

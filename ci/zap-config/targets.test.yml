@@ -1,0 +1,51 @@
+---
+defaults:
+  enabled: true
+  auth_mode: bearer
+  report_to_defectdojo: true
+  exclude_paths:
+    - "mozilla\\.com"
+    - "mozilla\\.net"
+    - "mozilla\\.org"
+    - "firefox\\.com"
+    - "getpocket\\.com"
+    - "cloudflare-dns\\.com"
+    - "digitalgov\\.gov"
+    - "elastic\\.co"
+    - "grafana\\.com"
+    - "jsdelivr\\.net"
+    - "secureauth\\.gsa\\.gov"
+    - ".*logout.*"
+    - ".*signout.*"
+  scan:
+    minutes: 5
+    max_depth: 3
+    thread_count: 1
+    passive_wait_minutes: 3
+    fail_warn_level: High
+    fail_error_level: High
+  defectdojo:
+    product_type_name: "Web Application"
+    product_name: "billing-api"
+    engagement_name: "Recurring ZAP - Development Test"
+    tags:
+      - zap
+      - concourse
+      - automated
+      - test
+
+services:
+  - service_name: billing-api-development-test
+    context: development
+    targets:
+      - name: billing-api-development-test
+        url: https://billing.dev.us-gov-west-1.aws-us-gov.cloud.gov
+        auth_profile: development
+        include_paths:
+          - "^https://billing\\.dev\\.us-gov-west-1\\.aws-us-gov\\.cloud\\.gov/.*"
+        defectdojo:
+          test_title: "billing.dev.us-gov-west-1.aws-us-gov.cloud.gov"
+        legacy:
+          source_file: "cloud.gov billing api development.context"
+          legacy_context_name: "cloud.gov billing api"
+          legacy_inscope: true

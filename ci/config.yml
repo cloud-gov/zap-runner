@@ -1,22 +1,50 @@
-# ci/config.yml
 ---
 repo_name: zap-runner
-runner_tag: "latest"
+runner_tag: "stable"
+cf_cli_version: "8.13.0"
 
-credentials:
-  internal:
-    client_id: ((credentials.internal.client_id?))
-    client_secret: ((credentials.internal.client_secret?))
-    token_uri: ((credentials.internal.token_uri?))
-  external:
-    client_id: ((credentials.external.client_id?))
-    client_secret: ((credentials.external.client_secret?))
-    token_uri: ((credentials.external.token_uri?))
-  pages:
-    client_id: ((credentials.pages.client_id?))
-    client_secret: ((credentials.pages.client_secret?))
-    token_uri: ((credentials.pages.token_uri?))
-  unauthenticated:
-    client_id: ""
-    client_secret: ""
-    token_uri: ""
+scan_schedule_interval: 24h
+aws_region: us-gov-west-1
+
+s3_bucket: ((zap_reports_bucket))
+s3_prefix: zap
+
+# Report-only first. Flip to "true" later when you want findings to fail builds.
+zap_enforce_failure: "false"
+zap_minutes: "20"
+zap_max_depth: "5"
+zap_thread_count: "2"
+zap_passive_wait_minutes: "10"
+zap_fail_warn_level: "Medium"
+zap_fail_error_level: "High"
+
+# Backed by CredHub. Concourse interpolates these into strings.
+auth_profiles_json: |
+  {
+    "development": {
+      "cf_api": "https://api.dev.us-gov-west-1.aws-us-gov.cloud.gov",
+      "username": "zap-scan-user",
+      "password": "((zap-scan-password-development))"
+    },
+    "staging": {
+      "cf_api": "https://api.fr-stage.cloud.gov",
+      "username": "zap-scan-user",
+      "password": "((zap-scan-password-staging))"
+    },
+    "production": {
+      "cf_api": "https://api.fr.cloud.gov",
+      "username": "zap-scan-user",
+      "password": "((zap-scan-password-production))"
+    }
+  }
+
+defectdojo_enabled: "true"
+defectdojo_url: ((defectdojo_url))
+defectdojo_api_key: ((defectdojo_api_key))
+defectdojo_verify_ssl: "true"
+defectdojo_scan_type: "ZAP Scan"
+defectdojo_minimum_severity: "Info"
+defectdojo_active: "true"
+defectdojo_verified: "true"
+defectdojo_close_old_findings: "false"
+defectdojo_auto_create_context: "true"
