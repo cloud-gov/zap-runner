@@ -47,15 +47,13 @@ RUN apt-get update && \
     python3-requests \
     python3-websocket \
     awscli && \
-    pip3 install --no-cache-dir PyYAML && \
-    \
-    # Install CF CLI (FIXED)
+    mkdir -p /tmp/cf-cli && \
     curl -fsSL "https://github.com/cloudfoundry/cli/releases/download/v${CF_CLI_VERSION}/cf8-cli_${CF_CLI_VERSION}_linux_x86-64.tgz" \
     -o /tmp/cf-cli.tgz && \
-    tar -xzf /tmp/cf-cli.tgz -C /usr/local/bin cf && \
-    chmod 0755 /usr/local/bin/cf && \
-    rm -f /tmp/cf-cli.tgz && \
-    \
+    tar -xzf /tmp/cf-cli.tgz -C /tmp/cf-cli && \
+    install -m 0755 /tmp/cf-cli/cf8 /usr/local/bin/cf8 && \
+    ln -sf /usr/local/bin/cf8 /usr/local/bin/cf && \
+    rm -rf /tmp/cf-cli /tmp/cf-cli.tgz && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/* /usr/share/doc /usr/share/man
 
