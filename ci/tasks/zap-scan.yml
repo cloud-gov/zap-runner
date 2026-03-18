@@ -39,6 +39,7 @@ run:
       shopt -s inherit_errexit
 
       repo_dir="zap-runner"
+      scripts_dir="${repo_dir}/scripts"
       targets_yml="${repo_dir}/${TARGETS_FILE}"
       work_root="/tmp/zap-report/${TARGET_CONTEXT}"
       state_root="/tmp/scan-state/${TARGET_CONTEXT}"
@@ -51,6 +52,17 @@ run:
         echo "Missing target inventory: ${targets_yml}" >&2
         exit 1
       fi
+
+      for required_script in \
+        "${scripts_dir}/render-targets-jsonl.py" \
+        "${scripts_dir}/build-zap-plan.py" \
+        "${scripts_dir}/build-context-summary.py"
+      do
+        if [[ ! -f "${required_script}" ]]; then
+          echo "Missing required script: ${required_script}" >&2
+          exit 1
+        fi
+      done
 
       if ! jq -e . >/dev/null 2>&1 <<<"${AUTH_PROFILES_JSON}"; then
         echo "AUTH_PROFILES_JSON is not valid JSON" >&2
@@ -108,203 +120,15 @@ run:
         printf '%s' "${TOKEN_CACHE[$profile]}"
       }
 
-      python3 - "${targets_yml}" "${TARGET_CONTEXT}" > "${state_root}/targets.jsonl" <<'PY'
-      import copy
-      import json
-      import sys
-      import yaml
-
-      path = sys.argv[1]
-      wanted_context = sys.argv[2]
-
-      with open(path, "r", encoding="utf-8") as f:
-          data = yaml.safe_load(f) or {}
-
-      global_defaults = data.get("defaults", {})
-      services = data.get("services", [])
-
-      def deep_merge(base, override):
-          if isinstance(base, dict) and isinstance(override, dict):
-              merged = copy.deepcopy(base)
-              for key, value in override.items():
-                  if key in merged:
-                      merged[key] = deep_merge(merged[key], value)
-                  else:
-                      merged[key] = copy.deepcopy(value)
-              return merged
-          return copy.deepcopy(override)
-
-      for service in services:
-          service_meta = {k: v for k, v in service.items() if k != "targets"}
-          service_defaults = deep_merge(global_defaults, service_meta)
-
-          for raw_target in service.get("targets", []):
-              target = deep_merge(service_defaults, raw_target)
-              if not target.get("enabled", True):
-                  continue
-              if target.get("context") != wanted_context:
-                  continue
-              print(json.dumps(target, separators=(",", ":")))
-      PY
+      python3 "${scripts_dir}/render-targets-jsonl.py" \
+        "${targets_yml}" \
+        "${TARGET_CONTEXT}" \
+        > "${state_root}/targets.jsonl"
 
       if [[ ! -s "${state_root}/targets.jsonl" ]]; then
         echo "No enabled targets found for context '${TARGET_CONTEXT}'"
         exit 0
       fi
-
-      build_plan() {
-        local target_json="$1"
-        local plan_path="$2"
-        local report_dir="$3"
-
-        TARGET_JSON="${target_json}" \
-        PLAN_PATH="${plan_path}" \
-        REPORT_DIR="${report_dir}" \
-        ZAP_MINUTES="${ZAP_MINUTES}" \
-        ZAP_MAX_DEPTH="${ZAP_MAX_DEPTH}" \
-        ZAP_THREAD_COUNT="${ZAP_THREAD_COUNT}" \
-        ZAP_PASSIVE_WAIT_MINUTES="${ZAP_PASSIVE_WAIT_MINUTES}" \
-        ZAP_FAIL_WARN_LEVEL="${ZAP_FAIL_WARN_LEVEL}" \
-        ZAP_FAIL_ERROR_LEVEL="${ZAP_FAIL_ERROR_LEVEL}" \
-        python3 - <<'PY'
-      import json
-      import os
-      import yaml
-
-      target = json.loads(os.environ["TARGET_JSON"])
-      plan_path = os.environ["PLAN_PATH"]
-      report_dir = os.environ["REPORT_DIR"]
-
-      name = target["name"]
-      url = target["url"]
-      include_paths = target.get("include_paths") or [f"^{url.rstrip('/')}/.*"]
-      exclude_paths = target.get("exclude_paths") or []
-      auth_mode = target.get("auth_mode", "unauthenticated")
-      bearer_token = target.get("_runtime_bearer_token", "")
-
-      jobs = []
-
-      if auth_mode == "bearer":
-          jobs.append({
-              "type": "replacer",
-              "parameters": {
-                  "deleteAllRules": True
-              },
-              "rules": [
-                  {
-                      "description": "Authorization header",
-                      "enabled": True,
-                      "matchType": "REQ_HEADER",
-                      "matchRegex": False,
-                      "matchString": "Authorization",
-                      "replacement": f"Bearer {bearer_token}",
-                      "initiators": [],
-                      "url": ""
-                  }
-              ]
-          })
-
-      jobs.extend([
-          {
-              "type": "spider",
-              "parameters": {
-                  "context": name,
-                  "user": "",
-                  "maxDepth": int(os.environ["ZAP_MAX_DEPTH"]),
-                  "threadCount": int(os.environ["ZAP_THREAD_COUNT"]),
-                  "url": url
-              }
-          },
-          {
-              "type": "passiveScan-config",
-              "parameters": {
-                  "maxAlertsPerRule": 10,
-                  "scanOnlyInScope": True
-              }
-          },
-          {
-              "type": "passiveScan-wait",
-              "parameters": {
-                  "maxDuration": int(os.environ["ZAP_PASSIVE_WAIT_MINUTES"])
-              }
-          },
-          {
-              "type": "activeScan",
-              "parameters": {
-                  "context": name,
-                  "user": "",
-                  "policy": "Default Policy",
-                  "maxRuleDurationInMins": 0,
-                  "maxScanDurationInMins": int(os.environ["ZAP_MINUTES"]),
-                  "addQueryParam": False,
-                  "inScopeOnly": True
-              }
-          },
-          {
-              "type": "report",
-              "parameters": {
-                  "template": "traditional-html",
-                  "reportDir": report_dir,
-                  "reportFile": f"{name}.html",
-                  "displayReport": False
-              }
-          },
-          {
-              "type": "report",
-              "parameters": {
-                  "template": "traditional-json",
-                  "reportDir": report_dir,
-                  "reportFile": f"{name}.json",
-                  "displayReport": False
-              }
-          },
-          {
-              "type": "report",
-              "parameters": {
-                  "template": "traditional-xml",
-                  "reportDir": report_dir,
-                  "reportFile": f"{name}.xml",
-                  "displayReport": False
-              }
-          },
-          {
-              "type": "report",
-              "parameters": {
-                  "template": "sarif-json",
-                  "reportDir": report_dir,
-                  "reportFile": f"{name}.sarif.json",
-                  "displayReport": False
-              }
-          },
-          {
-              "type": "exitStatus",
-              "parameters": {
-                  "warnLevel": os.environ["ZAP_FAIL_WARN_LEVEL"],
-                  "errorLevel": os.environ["ZAP_FAIL_ERROR_LEVEL"]
-              }
-          }
-      ])
-
-      plan = {
-          "env": {
-              "contexts": [
-                  {
-                      "name": name,
-                      "urls": [url],
-                      "includePaths": include_paths,
-                      "excludePaths": exclude_paths
-                  }
-              ]
-          },
-          "jobs": jobs
-      }
-
-      with open(plan_path, "w", encoding="utf-8") as f:
-          yaml.safe_dump(plan, f, sort_keys=False)
-      PY
-
-        chmod 600 "${plan_path}"
-      }
 
       while IFS= read -r target_json; do
         scanned_any="true"
@@ -332,7 +156,11 @@ run:
         fi
 
         echo "Building plan for ${name} (${url})"
-        build_plan "${runtime_target_json}" "${plan_file}" "${target_dir}"
+        python3 "${scripts_dir}/build-zap-plan.py" \
+          "${runtime_target_json}" \
+          "${plan_file}"
+
+        chmod 600 "${plan_file}"
 
         jq \
           --arg started_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
@@ -382,25 +210,10 @@ run:
         echo "Finished ${name}"
       done < "${state_root}/targets.jsonl"
 
-      python3 - "${work_root}" "${state_root}/context-summary.json" "${TARGET_CONTEXT}" <<'PY'
-      import json
-      import os
-      import sys
-
-      work_root = sys.argv[1]
-      summary_path = sys.argv[2]
-      context = sys.argv[3]
-
-      targets = []
-      for entry in sorted(os.listdir(work_root)):
-          metadata_path = os.path.join(work_root, entry, "scan-metadata.json")
-          if os.path.isfile(metadata_path):
-              with open(metadata_path, "r", encoding="utf-8") as f:
-                  targets.append(json.load(f))
-
-      with open(summary_path, "w", encoding="utf-8") as f:
-          json.dump({"context": context, "targets": targets}, f, indent=2)
-      PY
+      python3 "${scripts_dir}/build-context-summary.py" \
+        "${work_root}" \
+        "${state_root}/context-summary.json" \
+        "${TARGET_CONTEXT}"
 
       if [[ "${scanned_any}" != "true" ]]; then
         echo "No enabled targets found for context '${TARGET_CONTEXT}'"
