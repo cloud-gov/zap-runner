@@ -93,7 +93,8 @@ jobs:
     plan:
       - get: zap-runner
         trigger: false
-        passed: [scan-development-test]
+        passed:
+          - scan-development-test
 
       - task: defectdojo-import
         file: zap-runner/ci/tasks/defectdojo-import.yml
@@ -159,8 +160,7 @@ jobs:
       - in_parallel:
           steps:
             - get: zap-runner
-              trigger: true
-              passed: [set-self]
+              trigger: false
             - get: scan-schedule
               trigger: true
 
@@ -207,14 +207,10 @@ jobs:
   - name: import-to-defectdojo
     serial: true
     plan:
-      - in_parallel:
-          steps:
-            - get: zap-runner
-              trigger: false
-              passed: [scan-all-contexts]
-            - get: scan-schedule
-              trigger: true
-              passed: [scan-all-contexts]
+      - get: zap-runner
+        trigger: false
+        passed:
+          - scan-all-contexts
 
       - across:
           - var: context
