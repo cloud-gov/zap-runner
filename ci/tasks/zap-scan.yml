@@ -14,9 +14,7 @@ inputs:
 
 outputs:
   - name: zap-report
-    path: /tmp/zap-report
   - name: scan-state
-    path: /tmp/scan-state
 
 params:
   TARGET_CONTEXT:
@@ -41,8 +39,8 @@ run:
       repo_dir="zap-runner"
       scripts_dir="${repo_dir}/scripts"
       targets_yml="${repo_dir}/${TARGETS_FILE}"
-      work_root="/tmp/zap-report/${TARGET_CONTEXT}"
-      state_root="/tmp/scan-state/${TARGET_CONTEXT}"
+      work_root="zap-report/${TARGET_CONTEXT}"
+      state_root="scan-state/${TARGET_CONTEXT}"
 
       mkdir -p "${work_root}" "${state_root}"
 
