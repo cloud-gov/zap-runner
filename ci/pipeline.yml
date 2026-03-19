@@ -32,7 +32,7 @@ resources:
     type: git
     source:
       uri: https://github.com/cloud-gov/((repo_name))
-      branch: 2026-03-18_update
+      branch: main
       commit_verification_keys: ((cloud-gov-pgp-keys))
 
   - name: scan-schedule
@@ -52,124 +52,27 @@ jobs:
         var_files:
           - zap-runner/ci/config.yml
 
-  - name: scan-development-test
-    serial: true
-    plan:
-      - get: zap-runner
-        trigger: false
-
-      - task: zap-scan
-        file: zap-runner/ci/tasks/zap-scan.yml
-        vars:
-          repo_name: ((repo_name))
-          runner_tag: ((runner_tag))
-          aws_region: ((aws_region))
-        params:
-          TARGET_CONTEXT: development
-          TARGETS_FILE: ci/zap-config/targets.test.yml
-          AUTH_PROFILES_JSON: ((auth_profiles_json))
-          ZAP_ENFORCE_FAILURE: ((zap_enforce_failure))
-          ZAP_MINUTES: ((zap_minutes))
-          ZAP_MAX_DEPTH: ((zap_max_depth))
-          ZAP_THREAD_COUNT: ((zap_thread_count))
-          ZAP_PASSIVE_WAIT_MINUTES: ((zap_passive_wait_minutes))
-          ZAP_FAIL_WARN_LEVEL: ((zap_fail_warn_level))
-          ZAP_FAIL_ERROR_LEVEL: ((zap_fail_error_level))
-
-      - task: upload-to-s3
-        file: zap-runner/ci/tasks/upload-to-s3.yml
-        vars:
-          repo_name: ((repo_name))
-          runner_tag: ((runner_tag))
-          aws_region: ((aws_region))
-        params:
-          TARGET_CONTEXT: development
-          AWS_DEFAULT_REGION: ((aws_region))
-          S3_BUCKET: ((s3_bucket))
-          S3_PREFIX: ((s3_prefix))
-
-  - name: import-development-test-to-defectdojo
-    serial: true
-    plan:
-      - get: zap-runner
-        trigger: false
-        passed:
-          - scan-development-test
-
-      - task: defectdojo-import
-        file: zap-runner/ci/tasks/defectdojo-import.yml
-        vars:
-          repo_name: ((repo_name))
-          runner_tag: ((runner_tag))
-          aws_region: ((aws_region))
-        params:
-          TARGET_CONTEXT: development
-          AWS_DEFAULT_REGION: ((aws_region))
-          S3_BUCKET: ((s3_bucket))
-          S3_PREFIX: ((s3_prefix))
-          DEFECTDOJO_ENABLED: ((defectdojo_enabled))
-          DEFECTDOJO_URL: ((defectdojo_url))
-          DEFECTDOJO_API_KEY: ((defectdojo_api_key))
-          DEFECTDOJO_VERIFY_SSL: ((defectdojo_verify_ssl))
-          DEFECTDOJO_SCAN_TYPE: ((defectdojo_scan_type))
-          DEFECTDOJO_MINIMUM_SEVERITY: ((defectdojo_minimum_severity))
-          DEFECTDOJO_ACTIVE: ((defectdojo_active))
-          DEFECTDOJO_VERIFIED: ((defectdojo_verified))
-          DEFECTDOJO_CLOSE_OLD_FINDINGS: ((defectdojo_close_old_findings))
-          DEFECTDOJO_AUTO_CREATE_CONTEXT: ((defectdojo_auto_create_context))
-
-  - name: scan-development
-    serial: true
-    plan:
-      - get: zap-runner
-        trigger: false
-
-      - task: zap-scan
-        file: zap-runner/ci/tasks/zap-scan.yml
-        vars:
-          repo_name: ((repo_name))
-          runner_tag: ((runner_tag))
-          aws_region: ((aws_region))
-        params:
-          TARGET_CONTEXT: development
-          TARGETS_FILE: ci/zap-config/targets.yml
-          AUTH_PROFILES_JSON: ((auth_profiles_json))
-          ZAP_ENFORCE_FAILURE: ((zap_enforce_failure))
-          ZAP_MINUTES: ((zap_minutes))
-          ZAP_MAX_DEPTH: ((zap_max_depth))
-          ZAP_THREAD_COUNT: ((zap_thread_count))
-          ZAP_PASSIVE_WAIT_MINUTES: ((zap_passive_wait_minutes))
-          ZAP_FAIL_WARN_LEVEL: ((zap_fail_warn_level))
-          ZAP_FAIL_ERROR_LEVEL: ((zap_fail_error_level))
-
-      - task: upload-to-s3
-        file: zap-runner/ci/tasks/upload-to-s3.yml
-        vars:
-          repo_name: ((repo_name))
-          runner_tag: ((runner_tag))
-          aws_region: ((aws_region))
-        params:
-          TARGET_CONTEXT: development
-          AWS_DEFAULT_REGION: ((aws_region))
-          S3_BUCKET: ((s3_bucket))
-          S3_PREFIX: ((s3_prefix))
-
-  - name: scan-all-contexts
+  - name: scan-all-targets
     serial: true
     plan:
       - in_parallel:
           steps:
             - get: zap-runner
-              trigger: false
+              trigger: true
+              passed: [set-self]
             - get: scan-schedule
               trigger: true
 
       - across:
-          - var: context
+          - var: target_context
             values:
               - internal
               - external
               - pages
+            max_in_flight: all
+          - var: scan_variant
+            values:
+              - authenticated
               - unauthenticated
             max_in_flight: all
         fail_fast: false
@@ -181,8 +84,8 @@ jobs:
               runner_tag: ((runner_tag))
               aws_region: ((aws_region))
             params:
-              TARGET_CONTEXT: ((.:context))
-              TARGETS_FILE: ci/zap-config/targets.yml
+              TARGET_CONTEXT: ((.:target_context))
+              TARGET_SCAN_VARIANT: ((.:scan_variant))
               AUTH_PROFILES_JSON: ((auth_profiles_json))
               ZAP_ENFORCE_FAILURE: ((zap_enforce_failure))
               ZAP_MINUTES: ((zap_minutes))
@@ -199,7 +102,8 @@ jobs:
               runner_tag: ((runner_tag))
               aws_region: ((aws_region))
             params:
-              TARGET_CONTEXT: ((.:context))
+              TARGET_CONTEXT: ((.:target_context))
+              TARGET_SCAN_VARIANT: ((.:scan_variant))
               AWS_DEFAULT_REGION: ((aws_region))
               S3_BUCKET: ((s3_bucket))
               S3_PREFIX: ((s3_prefix))
@@ -207,17 +111,25 @@ jobs:
   - name: import-to-defectdojo
     serial: true
     plan:
-      - get: zap-runner
-        trigger: false
-        passed:
-          - scan-all-contexts
+      - in_parallel:
+          steps:
+            - get: zap-runner
+              trigger: false
+              passed: [scan-all-targets]
+            - get: scan-schedule
+              trigger: true
+              passed: [scan-all-targets]
 
       - across:
-          - var: context
+          - var: target_context
             values:
               - internal
               - external
               - pages
+            max_in_flight: all
+          - var: scan_variant
+            values:
+              - authenticated
               - unauthenticated
             max_in_flight: all
         fail_fast: false
@@ -229,7 +141,8 @@ jobs:
               runner_tag: ((runner_tag))
               aws_region: ((aws_region))
             params:
-              TARGET_CONTEXT: ((.:context))
+              TARGET_CONTEXT: ((.:target_context))
+              TARGET_SCAN_VARIANT: ((.:scan_variant))
               AWS_DEFAULT_REGION: ((aws_region))
               S3_BUCKET: ((s3_bucket))
               S3_PREFIX: ((s3_prefix))
@@ -248,8 +161,5 @@ groups:
   - name: default
     jobs:
       - set-self
-      - scan-development-test
-      - import-development-test-to-defectdojo
-      - scan-development
-      - scan-all-contexts
+      - scan-all-targets
       - import-to-defectdojo
