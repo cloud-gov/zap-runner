@@ -41,7 +41,7 @@
 
 # Pipeline repo (this repo)
 pipeline_repo_uri: ((pipeline_repo_uri))
-pipeline_repo_branch: main
+pipeline_repo_branch: 2026-03-18_update
 
 # Docker image — stored in cloud-gov ECR (us-gov-west-1)
 image_repository: zap-runner
