@@ -6,7 +6,7 @@ image_resource:
     aws_access_key_id: ((ecr_aws_key))
     aws_secret_access_key: ((ecr_aws_secret))
     repository: ((repo_name))
-    aws_region: ((aws_region))
+    aws_region: us-gov-west-1
     tag: ((runner_tag))
 
 inputs:
@@ -19,9 +19,11 @@ outputs:
 
 params:
   TARGET_CONTEXT:
+  TARGET_SCAN_VARIANT:
   AWS_DEFAULT_REGION:
   S3_BUCKET:
   S3_PREFIX: zap
+  S3_UPLOAD_ENABLED: "true"
 
 run:
   path: bash
@@ -29,14 +31,21 @@ run:
     - -ceu
     - |
       set -o pipefail
+      shopt -s inherit_errexit
 
-      report_src="zap-report/${TARGET_CONTEXT}"
-      summary_src="scan-state/${TARGET_CONTEXT}/context-summary.json"
-      published_root="/tmp/published-state/${TARGET_CONTEXT}"
+      if [[ "${S3_UPLOAD_ENABLED}" != "true" ]]; then
+        echo "S3 upload disabled — skipping"
+        exit 0
+      fi
+
+      scan_key="${TARGET_CONTEXT}-${TARGET_SCAN_VARIANT}"
+      report_src="zap-report/${scan_key}"
+      summary_src="scan-state/${scan_key}/context-summary.json"
+      published_root="/tmp/published-state/${scan_key}"
       mkdir -p "${published_root}"
 
       if [[ ! -d "${report_src}" ]]; then
-        echo "Nothing to upload for context '${TARGET_CONTEXT}'"
+        echo "Nothing to upload for scan key '${scan_key}'"
         exit 0
       fi
 
@@ -46,63 +55,50 @@ run:
       fi
 
       timestamp="$(date -u +%Y/%m/%d/%H%M%S)"
-      scan_prefix="${S3_PREFIX}/reports/${TARGET_CONTEXT}/${timestamp}"
-      latest_manifest_key="${S3_PREFIX}/manifests/latest/${TARGET_CONTEXT}.json"
-      run_manifest_key="${S3_PREFIX}/manifests/runs/${TARGET_CONTEXT}/$(date -u +%Y%m%dT%H%M%SZ).json"
+      scan_prefix="${S3_PREFIX}/reports/${TARGET_CONTEXT}/${TARGET_SCAN_VARIANT}/${timestamp}"
+      latest_manifest_key="${S3_PREFIX}/manifests/latest/${scan_key}.json"
+      run_manifest_key="${S3_PREFIX}/manifests/runs/${scan_key}/$(date -u +%Y%m%dT%H%M%SZ).json"
 
+      # Upload all reports
       aws s3 cp "${report_src}" "s3://${S3_BUCKET}/${scan_prefix}/" --recursive --only-show-errors
 
-      python3 - <<'PY' \
-        "${summary_src}" \
-        "${S3_BUCKET}" \
-        "${scan_prefix}" \
-        "${TARGET_CONTEXT}" \
-        "${published_root}/manifest.json"
-import json
-import sys
+      # Build manifest with S3 URIs
+      python3 - "${summary_src}" "${S3_BUCKET}" "${scan_prefix}" "${TARGET_CONTEXT}" "${TARGET_SCAN_VARIANT}" "${published_root}/manifest.json" <<'PY'
+      import json, sys
+      summary_path, bucket, scan_prefix, context, scan_variant, out_path = sys.argv[1:7]
+      with open(summary_path, "r", encoding="utf-8") as f:
+          summary = json.load(f)
+      manifest = {"context": context, "scan_variant": scan_variant,
+          "scan_key": f"{context}-{scan_variant}", "bucket": bucket,
+          "scan_prefix": scan_prefix, "targets": []}
+      for target in summary.get("targets", []):
+          name = target["name"]
+          target_prefix = f"s3://{bucket}/{scan_prefix}/{name}"
+          manifest["targets"].append({
+              "name": name, "service_name": target.get("service_name"),
+              "context": target["context"],
+              "scan_variant": target.get("scan_variant", scan_variant),
+              "url": target["url"],
+              "auth_mode": target.get("auth_mode", "unauthenticated"),
+              "report_to_defectdojo": target.get("report_to_defectdojo", False),
+              "defectdojo": target.get("defectdojo", {}),
+              "zap_exit_code": target.get("zap_exit_code", 0),
+              "xml_report_s3_uri": f"{target_prefix}/{target['xml_report']}",
+              "json_report_s3_uri": f"{target_prefix}/{target['json_report']}",
+              "html_report_s3_uri": f"{target_prefix}/{target['html_report']}",
+              "sarif_report_s3_uri": f"{target_prefix}/{target['sarif_report']}",
+              "started_at_utc": target.get("started_at_utc"),
+              "finished_at_utc": target.get("finished_at_utc"),
+          })
+      with open(out_path, "w", encoding="utf-8") as f:
+          json.dump(manifest, f, indent=2)
+      PY
 
-summary_path, bucket, scan_prefix, context, out_path = sys.argv[1:6]
-
-with open(summary_path, "r", encoding="utf-8") as f:
-    summary = json.load(f)
-
-manifest = {
-    "context": context,
-    "bucket": bucket,
-    "scan_prefix": scan_prefix,
-    "targets": [],
-}
-
-for target in summary.get("targets", []):
-    name = target["name"]
-    target_prefix = f"s3://{bucket}/{scan_prefix}/{name}"
-    manifest["targets"].append({
-        "name": name,
-        "context": target["context"],
-        "url": target["url"],
-        "auth_mode": target.get("auth_mode", "unauthenticated"),
-        "report_to_defectdojo": target.get("report_to_defectdojo", False),
-        "defectdojo": target.get("defectdojo", {}),
-        "zap_exit_code": target.get("zap_exit_code", 0),
-        "xml_report_s3_uri": f"{target_prefix}/{target['xml_report']}",
-        "json_report_s3_uri": f"{target_prefix}/{target['json_report']}",
-        "html_report_s3_uri": f"{target_prefix}/{target['html_report']}",
-        "sarif_report_s3_uri": f"{target_prefix}/{target['sarif_report']}",
-        "started_at_utc": target.get("started_at_utc"),
-        "finished_at_utc": target.get("finished_at_utc"),
-    })
-
-with open(out_path, "w", encoding="utf-8") as f:
-    json.dump(manifest, f, indent=2)
-PY
-
+      # Publish manifests (latest + timestamped)
       aws s3 cp "${published_root}/manifest.json" \
-        "s3://${S3_BUCKET}/${run_manifest_key}" \
-        --only-show-errors
-
+        "s3://${S3_BUCKET}/${run_manifest_key}" --only-show-errors
       aws s3 cp "${published_root}/manifest.json" \
-        "s3://${S3_BUCKET}/${latest_manifest_key}" \
-        --only-show-errors
+        "s3://${S3_BUCKET}/${latest_manifest_key}" --only-show-errors
 
       echo "Uploaded reports to s3://${S3_BUCKET}/${scan_prefix}/"
-      echo "Published latest manifest to s3://${S3_BUCKET}/${latest_manifest_key}"
+      echo "Published manifest to s3://${S3_BUCKET}/${latest_manifest_key}"

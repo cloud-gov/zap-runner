@@ -1,0 +1,58 @@
+Error processing line 1 of /home/william/.pyenv/versions/3.12.3/lib/python3.12/site-packages/matplotlib-0.1.0.dev46437+unknown.g430fb1db8.d20260306-nspkg.pth:
+
+  Traceback (most recent call last):
+    File "<frozen site>", line 195, in addpackage
+    File "<string>", line 1, in <module>
+    File "<frozen importlib._bootstrap>", line 810, in module_from_spec
+  AttributeError: 'NoneType' object has no attribute 'loader'
+
+Remainder of file ignored
+# Auth profiles extracted — add to ci/config.yml auth_profiles_json
+# Each profile uses the cf-uaa provider (CF UAA bearer token)
+#
+# To use with zap-runner, paste this into config.yml:
+# auth_profiles_json: |
+#   {
+#     "development": {
+#       "provider": "cf-uaa",
+#       "cf_api": "https://api.dev.example.com",
+#       "username": "zap-scan-user",
+#       "password": "((zap-scan-password-development))"
+#     },
+#     "staging": {
+#       "provider": "cf-uaa",
+#       "cf_api": "https://api.staging.example.com",
+#       "username": "zap-scan-user",
+#       "password": "((zap-scan-password-staging))"
+#     },
+#     "production": {
+#       "provider": "cf-uaa",
+#       "cf_api": "https://api.production.example.com",
+#       "username": "zap-scan-user",
+#       "password": "((zap-scan-password-production))"
+#     }
+#   }
+
+# Raw JSON:
+{
+  "development": {
+    "provider": "cf-uaa",
+    "cf_api": "https://api.dev.example.com",
+    "username": "zap-scan-user",
+    "password": "((zap-scan-password-development))"
+  },
+  "staging": {
+    "provider": "cf-uaa",
+    "cf_api": "https://api.staging.example.com",
+    "username": "zap-scan-user",
+    "password": "((zap-scan-password-staging))"
+  },
+  "production": {
+    "provider": "cf-uaa",
+    "cf_api": "https://api.production.example.com",
+    "username": "zap-scan-user",
+    "password": "((zap-scan-password-production))"
+  }
+}
+
+Extracted 3 profile(s)

@@ -1,19 +1,7 @@
 ---
-# Cloud-Gov ZAP Scan Targets
-#
-# Contexts: internal, external, pages, development
-# Scan types: web (default, full spider) | api (shallow, depth 1)
-#
-# Scan Profiles (centrally managed in defaults.scan_profiles):
-#   full       — 20min, depth 5, 2 threads (default for web apps)
-#   api        — 10min, depth 2, 1 thread  (REST APIs, scan_type: api)
-#   dashboard  — 10min, depth 3, 2 threads (admin UIs, dashboards)
-#   monitoring — 3min,  depth 2, 1 thread  (passive-only, read-only UIs)
-#   identity   — 10min, depth 3, 1 thread  (auth/login pages, careful)
-#   light      — 5min,  depth 2, 1 thread  (static/public sites)
-#
-# Usage: set scan_profile on each target. No inline scan settings needed.
-# To override a single setting, add it under scan: (deep merge with profile).
+# Imported targets — review and customize before use
+# Source: ci/zap-config/targets.yml
+# Targets: 26
 
 defaults:
   enabled: true
@@ -34,7 +22,7 @@ defaults:
   - secureauth\.gsa\.gov
   - .*logout.*
   - .*signout.*
-  scan: &id001
+  scan:
     minutes: 20
     max_depth: 5
     thread_count: 2
@@ -47,305 +35,345 @@ defaults:
     - zap
     - concourse
     - automated
-  scan_profiles:
-    full: *id001
-    api:
-      minutes: 10
-      max_depth: 2
-      thread_count: 1
-      passive_wait_minutes: 5
-      fail_warn_level: Medium
-      fail_error_level: High
-    dashboard:
-      minutes: 10
-      max_depth: 3
-      thread_count: 2
-      passive_wait_minutes: 5
-      fail_warn_level: Medium
-      fail_error_level: High
-    monitoring:
-      minutes: 3
-      max_depth: 2
-      thread_count: 1
-      passive_wait_minutes: 2
-      passive_only: true
-      fail_warn_level: Medium
-      fail_error_level: High
-    identity:
-      minutes: 10
-      max_depth: 3
-      thread_count: 1
-      passive_wait_minutes: 5
-      fail_warn_level: Medium
-      fail_error_level: High
-    light:
-      minutes: 5
-      max_depth: 2
-      thread_count: 1
-      passive_wait_minutes: 3
-      fail_warn_level: Medium
-      fail_error_level: High
 services:
 - service_name: cloud-gov-public
   context: external
   scan_variant: unauthenticated
   auth_mode: unauthenticated
-  defectdojo:
-    product_name: cloud.gov Public
   targets:
   - name: cloud-gov-public
-    url: https://cloud.gov
+    url: https://cloud-gov.example.com
     include_paths:
     - ^https://cloud\.gov/.*
+    scan:
+      minutes: 5
+      max_depth: 2
+      thread_count: 1
     defectdojo:
       engagement_name: Recurring ZAP - cloud.gov Public
       test_title: cloud.gov (unauthenticated)
-    scan_profile: light
+  defectdojo:
+    product_name: cloud.gov Public
 - service_name: billing-api-development
   context: development
   scan_variant: authenticated
+  auth_mode: bearer
   targets:
   - name: billing-api-development
-    url: https://billing.dev.us-gov-west-1.aws-us-gov.cloud.gov
+    url: https://billing.apps.example.com
     include_paths:
     - ^https://billing\.dev\.us-gov-west-1\.aws-us-gov\.cloud\.gov/.*
+    scan:
+      minutes: 10
+      max_depth: 2
+      thread_count: 1
     defectdojo:
       engagement_name: Recurring ZAP - Development
       test_title: billing.dev.us-gov-west-1.aws-us-gov.cloud.gov
-    scan_type: api
-    scan_profile: api
   auth_profile: development
   defectdojo:
     product_name: billing-api
 - service_name: billing-api
   context: external
   scan_variant: authenticated
+  auth_mode: bearer
   targets:
   - name: billing-api-staging
-    url: https://billing.fr-stage.cloud.gov
+    url: https://billing.apps.example.com
     include_paths:
     - ^https://billing\.fr-stage\.cloud\.gov/.*
+    scan:
+      minutes: 10
+      max_depth: 2
+      thread_count: 1
     defectdojo:
       engagement_name: Recurring ZAP - Staging
       test_title: billing.fr-stage.cloud.gov
-    scan_type: api
-    scan_profile: api
   - name: billing-api-production
-    url: https://billing.fr.cloud.gov
+    url: https://billing.apps.example.com
     include_paths:
     - ^https://billing\.fr\.cloud\.gov/.*
+    scan:
+      minutes: 10
+      max_depth: 2
+      thread_count: 1
     defectdojo:
       engagement_name: Recurring ZAP - Production
       test_title: billing.fr.cloud.gov
-    scan_type: api
-    scan_profile: api
   auth_profile: staging
   defectdojo:
     product_name: billing-api
 - service_name: pages-editor
   context: pages
   scan_variant: authenticated
+  auth_mode: bearer
   targets:
   - name: pages-editor-development
-    url: https://pages-editor-dev.app.cloud.gov
+    url: https://pages-editor-dev.apps.example.com
     include_paths:
     - ^https://pages-editor-dev\.app\.cloud\.gov/.*
+    scan:
+      minutes: 20
+      max_depth: 5
+      thread_count: 2
     defectdojo:
       engagement_name: Recurring ZAP - Development
       test_title: pages-editor-dev.app.cloud.gov
-    scan_profile: dashboard
   auth_profile: development
   defectdojo:
     product_name: pages-editor
 - service_name: conmon-external
   context: external
   scan_variant: authenticated
+  auth_mode: bearer
   targets:
   - name: account-production
-    url: https://account.fr.cloud.gov
+    url: https://account.apps.example.com
     include_paths:
     - ^https://account\.fr\.cloud\.gov/.*
+    scan:
+      minutes: 20
+      max_depth: 5
+      thread_count: 2
     defectdojo:
       engagement_name: Recurring ZAP - Production
       test_title: account.fr.cloud.gov
-    scan_profile: full
   - name: api-production
-    url: https://api.fr.cloud.gov
+    url: https://api.apps.example.com
     include_paths:
     - ^https://api\.fr\.cloud\.gov/.*
+    scan:
+      minutes: 10
+      max_depth: 2
+      thread_count: 1
     defectdojo:
       engagement_name: Recurring ZAP - Production
       test_title: api.fr.cloud.gov
-    scan_type: api
-    scan_profile: api
   - name: cloud-gov-production
-    url: https://cloud.gov
+    url: https://cloud-gov.example.com
     include_paths:
     - ^https://cloud\.gov/.*
+    scan:
+      minutes: 20
+      max_depth: 5
+      thread_count: 2
     defectdojo:
       engagement_name: Recurring ZAP - Production
       test_title: cloud.gov
-    scan_profile: full
   - name: dashboard-production
-    url: https://dashboard.fr.cloud.gov
+    url: https://dashboard.apps.example.com
     include_paths:
     - ^https://dashboard\.fr\.cloud\.gov/.*
+    scan:
+      minutes: 10
+      max_depth: 3
+      thread_count: 2
     defectdojo:
       engagement_name: Recurring ZAP - Production
       test_title: dashboard.fr.cloud.gov
-    scan_profile: dashboard
   - name: idp-production
-    url: https://idp.fr.cloud.gov
+    url: https://idp.apps.example.com
     include_paths:
     - ^https://idp\.fr\.cloud\.gov/.*
+    scan:
+      minutes: 10
+      max_depth: 3
+      thread_count: 1
     defectdojo:
       engagement_name: Recurring ZAP - Production
       test_title: idp.fr.cloud.gov
-    scan_profile: identity
   - name: login-production
-    url: https://login.fr.cloud.gov
+    url: https://login.apps.example.com
     include_paths:
     - ^https://login\.fr\.cloud\.gov/.*
+    scan:
+      minutes: 10
+      max_depth: 3
+      thread_count: 1
     defectdojo:
       engagement_name: Recurring ZAP - Production
       test_title: login.fr.cloud.gov
-    scan_profile: identity
   - name: logs-production
-    url: https://logs.fr.cloud.gov
+    url: https://logs.apps.example.com
     include_paths:
     - ^https://logs\.fr\.cloud\.gov/.*
+    scan:
+      minutes: 10
+      max_depth: 3
+      thread_count: 2
     defectdojo:
       engagement_name: Recurring ZAP - Production
       test_title: logs.fr.cloud.gov
-    scan_profile: dashboard
   - name: cg-ui-production
-    url: https://cg-ui.fr.cloud.gov
+    url: https://cg-ui.apps.example.com
     include_paths:
     - ^https://cg-ui\.fr\.cloud\.gov/.*
+    scan:
+      minutes: 10
+      max_depth: 3
+      thread_count: 2
     defectdojo:
       engagement_name: Recurring ZAP - Production
       test_title: cg-ui.fr.cloud.gov
-    scan_profile: dashboard
   - name: csb-production
-    url: https://csb.fr.cloud.gov
+    url: https://csb.apps.example.com
     include_paths:
     - ^https://csb\.fr\.cloud\.gov/.*
+    scan:
+      minutes: 10
+      max_depth: 2
+      thread_count: 1
     defectdojo:
       engagement_name: Recurring ZAP - Production
       test_title: csb.fr.cloud.gov
-    scan_type: api
-    scan_profile: api
   - name: services-production
-    url: https://services.fr.cloud.gov
+    url: https://services.apps.example.com
     include_paths:
     - ^https://services\.fr\.cloud\.gov/.*
+    scan:
+      minutes: 10
+      max_depth: 2
+      thread_count: 1
     defectdojo:
       engagement_name: Recurring ZAP - Production
       test_title: services.fr.cloud.gov
-    scan_type: api
-    scan_profile: api
   auth_profile: production
   defectdojo:
     product_name: cloud.gov conmon external
 - service_name: conmon-internal
   context: internal
   scan_variant: authenticated
+  auth_mode: bearer
   targets:
   - name: alertmanager-production
-    url: https://alertmanager.fr.cloud.gov
+    url: https://alertmanager.apps.example.com
     include_paths:
     - ^https://alertmanager\.fr\.cloud\.gov/.*
+    scan:
+      minutes: 3
+      max_depth: 2
+      thread_count: 1
     defectdojo:
       engagement_name: Recurring ZAP - Production
       test_title: alertmanager.fr.cloud.gov
-    scan_profile: monitoring
   - name: ci-production
-    url: https://ci.fr.cloud.gov
+    url: https://ci.apps.example.com
     include_paths:
     - ^https://ci\.fr\.cloud\.gov/.*
+    scan:
+      minutes: 10
+      max_depth: 3
+      thread_count: 2
     defectdojo:
       engagement_name: Recurring ZAP - Production
       test_title: ci.fr.cloud.gov
-    scan_profile: dashboard
   - name: grafana-production
-    url: https://grafana.fr.cloud.gov
+    url: https://grafana.apps.example.com
     include_paths:
     - ^https://grafana\.fr\.cloud\.gov/.*
+    scan:
+      minutes: 10
+      max_depth: 3
+      thread_count: 2
     defectdojo:
       engagement_name: Recurring ZAP - Production
       test_title: grafana.fr.cloud.gov
-    scan_profile: dashboard
   - name: logs-platform-production
-    url: https://logs-platform.fr.cloud.gov
+    url: https://logs-platform.apps.example.com
     include_paths:
     - ^https://logs-platform\.fr\.cloud\.gov/.*
+    scan:
+      minutes: 10
+      max_depth: 3
+      thread_count: 2
     defectdojo:
       engagement_name: Recurring ZAP - Production
       test_title: logs-platform.fr.cloud.gov
-    scan_profile: dashboard
   - name: opslogin-production
-    url: https://opslogin.fr.cloud.gov
+    url: https://opslogin.apps.example.com
     include_paths:
     - ^https://opslogin\.fr\.cloud\.gov/.*
+    scan:
+      minutes: 10
+      max_depth: 3
+      thread_count: 1
     defectdojo:
       engagement_name: Recurring ZAP - Production
       test_title: opslogin.fr.cloud.gov
-    scan_profile: identity
   - name: prometheus-production
-    url: https://prometheus.fr.cloud.gov
+    url: https://prometheus.apps.example.com
     include_paths:
     - ^https://prometheus\.fr\.cloud\.gov/.*
+    scan:
+      minutes: 3
+      max_depth: 2
+      thread_count: 1
     defectdojo:
       engagement_name: Recurring ZAP - Production
       test_title: prometheus.fr.cloud.gov
-    scan_profile: monitoring
   - name: doomsday-production
-    url: https://doomsday.fr.cloud.gov
+    url: https://doomsday.apps.example.com
     include_paths:
     - ^https://doomsday\.fr\.cloud\.gov/.*
+    scan:
+      minutes: 3
+      max_depth: 2
+      thread_count: 1
     defectdojo:
       engagement_name: Recurring ZAP - Production
       test_title: doomsday.fr.cloud.gov
-    scan_profile: monitoring
   auth_profile: production
   defectdojo:
     product_name: cloud.gov conmon internal
 - service_name: conmon-pages
   context: pages
   scan_variant: authenticated
+  auth_mode: bearer
   targets:
   - name: pages-staging
-    url: https://pages-staging.cloud.gov
+    url: https://pages-staging.apps.example.com
     include_paths:
     - ^https://pages-staging\.cloud\.gov/.*
+    scan:
+      minutes: 20
+      max_depth: 5
+      thread_count: 2
     defectdojo:
       engagement_name: Recurring ZAP - Staging
       test_title: pages-staging.cloud.gov
-    scan_profile: full
   - name: pages-production
-    url: https://pages.cloud.gov
+    url: https://pages.apps.example.com
     include_paths:
     - ^https://pages\.cloud\.gov/.*
+    scan:
+      minutes: 20
+      max_depth: 5
+      thread_count: 2
     defectdojo:
       engagement_name: Recurring ZAP - Production
       test_title: pages.cloud.gov
-    scan_profile: full
   - name: admin-pages-staging
-    url: https://admin.pages-staging.cloud.gov
+    url: https://admin.apps.example.com
     include_paths:
     - ^https://admin\.pages-staging\.cloud\.gov/.*
+    scan:
+      minutes: 20
+      max_depth: 5
+      thread_count: 2
     defectdojo:
       engagement_name: Recurring ZAP - Staging
       test_title: admin.pages-staging.cloud.gov
-    scan_profile: dashboard
   - name: admin-pages-production
-    url: https://admin.pages.cloud.gov
+    url: https://admin.apps.example.com
     include_paths:
     - ^https://admin\.pages\.cloud\.gov/.*
+    scan:
+      minutes: 20
+      max_depth: 5
+      thread_count: 2
     defectdojo:
       engagement_name: Recurring ZAP - Production
       test_title: admin.pages.cloud.gov
-    scan_profile: dashboard
   auth_profile: staging
   defectdojo:
     product_name: cloud.gov pages

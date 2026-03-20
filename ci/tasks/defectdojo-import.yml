@@ -6,7 +6,7 @@ image_resource:
     aws_access_key_id: ((ecr_aws_key))
     aws_secret_access_key: ((ecr_aws_secret))
     repository: ((repo_name))
-    aws_region: ((aws_region))
+    aws_region: us-gov-west-1
     tag: ((runner_tag))
 
 outputs:
@@ -15,6 +15,7 @@ outputs:
 
 params:
   TARGET_CONTEXT:
+  TARGET_SCAN_VARIANT:
   AWS_DEFAULT_REGION:
   S3_BUCKET:
   S3_PREFIX: zap
@@ -35,6 +36,7 @@ run:
     - -ceu
     - |
       set -o pipefail
+      shopt -s inherit_errexit
 
       if [[ "${DEFECTDOJO_ENABLED}" != "true" ]]; then
         echo "DefectDojo import disabled"
@@ -46,10 +48,12 @@ run:
         exit 1
       fi
 
-      manifest_s3_uri="s3://${S3_BUCKET}/${S3_PREFIX}/manifests/latest/${TARGET_CONTEXT}.json"
-      workdir="/tmp/defectdojo-state/${TARGET_CONTEXT}"
+      scan_key="${TARGET_CONTEXT}-${TARGET_SCAN_VARIANT}"
+      manifest_s3_uri="s3://${S3_BUCKET}/${S3_PREFIX}/manifests/latest/${scan_key}.json"
+      workdir="/tmp/defectdojo-state/${scan_key}"
       mkdir -p "${workdir}"
 
+      # Download manifest from S3
       aws s3 cp "${manifest_s3_uri}" "${workdir}/manifest.json" --only-show-errors
 
       verify_args=()
@@ -57,20 +61,18 @@ run:
         verify_args+=(--insecure)
       fi
 
-      python3 - <<'PY' "${workdir}/manifest.json" > "${workdir}/targets.jsonl"
-import json
-import sys
-
-with open(sys.argv[1], "r", encoding="utf-8") as f:
-    manifest = json.load(f)
-
-for target in manifest.get("targets", []):
-    if target.get("report_to_defectdojo"):
-        print(json.dumps(target, separators=(",", ":")))
-PY
+      # Filter targets that should be imported to DefectDojo
+      python3 - "${workdir}/manifest.json" <<'PY' > "${workdir}/targets.jsonl"
+      import json, sys
+      with open(sys.argv[1], "r", encoding="utf-8") as f:
+          manifest = json.load(f)
+      for target in manifest.get("targets", []):
+          if target.get("report_to_defectdojo"):
+              print(json.dumps(target, separators=(",", ":")))
+      PY
 
       if [[ ! -s "${workdir}/targets.jsonl" ]]; then
-        echo "No DefectDojo-importable targets found for context '${TARGET_CONTEXT}'"
+        echo "No DefectDojo-importable targets found for scan key '${scan_key}'"
         exit 0
       fi
 
@@ -97,9 +99,7 @@ PY
         aws s3 cp "${xml_uri}" "${report_file}" --only-show-errors
 
         curl \
-          --silent \
-          --show-error \
-          --fail \
+          --silent --show-error --fail \
           "${verify_args[@]}" \
           -X POST \
           -H "Authorization: Token ${DEFECTDOJO_API_KEY}" \

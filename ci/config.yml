@@ -1,15 +1,65 @@
 ---
-repo_name: zap-runner
-runner_tag: "stable"
-cf_cli_version: "8.13.0"
+# Cloud-Gov DAST Scanner Configuration
+#
+# Aligned with cloud-gov/common-pipelines patterns:
+#   - ECR-hosted resource types and task images
+#   - ubuntu-hardened-stig base image
+#   - CredHub for all secrets
+#
+# CredHub secrets needed:
+#
+#   Already provisioned (ZAP auth):
+#     /concourse/main/zap-scanner/zap-scan-password-development
+#     /concourse/main/zap-scanner/zap-scan-password-staging
+#     /concourse/main/zap-scanner/zap-scan-password-production
+#     /concourse/main/zap-scanner/zap_scan_client_secret-opsuaa
+#
+#   Need to set (pipeline config):
+#     /concourse/main/zap-scanner/pipeline_repo_uri  — git URI for this repo
+#     /concourse/main/zap-scanner/zap_reports_bucket — S3 bucket for ZAP reports
+#
+#   DefectDojo (may reuse existing deploy-defectdojo creds):
+#     /concourse/main/zap-scanner/defectdojo_url     — reimport-scan API endpoint
+#     /concourse/main/zap-scanner/defectdojo_api_key  — API token
+#     See: https://github.com/cloud-gov/deploy-defectdojo for existing
+#          ((defectdojo_production_auth_token)) and ((defectdojo_production_import_url))
+#
+#   Shared cloud-gov (should already exist):
+#     /concourse/main/ecr_aws_key
+#     /concourse/main/ecr_aws_secret
+#     /concourse/main/cloud-gov-pgp-keys
+#
+#   S3 bucket setup (one-time):
+#     cf create-service s3 basic zap-reports
+#     cf create-service-key zap-reports zap-reports-key
+#     cf service-key zap-reports zap-reports-key  # → bucket name, access key, etc.
+#     credhub set -n /concourse/main/zap-scanner/zap_reports_bucket -t value -v "BUCKET_NAME"
+#
+# Deploy:
+#   fly -t <target> set-pipeline -p zap-scanner \
+#     -c ci/pipeline.yml -l ci/config.yml
 
+# Pipeline repo (this repo)
+pipeline_repo_uri: ((pipeline_repo_uri))
+pipeline_repo_branch: main
+
+# Docker image — stored in cloud-gov ECR (us-gov-west-1)
+image_repository: zap-runner
+runner_tag: "latest"
+cf_cli_version: "8.18.0"
+
+# Scan schedule
 scan_schedule_interval: 24h
+
+# AWS region for S3 report storage
 aws_region: us-gov-west-1
 
+# S3 report storage — set to "false" during initial testing to avoid uploads
+s3_upload_enabled: "false"
 s3_bucket: ((zap_reports_bucket))
 s3_prefix: zap
 
-# Report-only first. Flip to "true" later when you want findings to fail builds.
+# Scan defaults
 zap_enforce_failure: "false"
 zap_minutes: "20"
 zap_max_depth: "5"
@@ -18,27 +68,42 @@ zap_passive_wait_minutes: "10"
 zap_fail_warn_level: "Medium"
 zap_fail_error_level: "High"
 
-# Backed by CredHub. Concourse interpolates these into strings.
+# Finding filters — exclude low-confidence/informational noise
+zap_min_risk_level: "Low"
+zap_min_confidence: "Medium"
+zap_report_formats: "html,json,xml,sarif"
+
+# Authentication profiles — CF UAA bearer token per environment
+# Concourse auto-interpolates ((var)) from CredHub at pipeline set time.
 auth_profiles_json: |
   {
     "development": {
+      "provider": "cf-uaa",
       "cf_api": "https://api.dev.us-gov-west-1.aws-us-gov.cloud.gov",
       "username": "zap-scan-user",
       "password": "((zap-scan-password-development))"
     },
     "staging": {
+      "provider": "cf-uaa",
       "cf_api": "https://api.fr-stage.cloud.gov",
       "username": "zap-scan-user",
       "password": "((zap-scan-password-staging))"
     },
     "production": {
+      "provider": "cf-uaa",
       "cf_api": "https://api.fr.cloud.gov",
       "username": "zap-scan-user",
       "password": "((zap-scan-password-production))"
     }
   }
 
-defectdojo_enabled: "true"
+# DefectDojo integration
+# URL is the reimport-scan API endpoint (e.g., https://defectdojo.example.com/api/v2/reimport-scan/)
+# Auth token from deploy-defectdojo pipeline CredHub vars:
+#   Staging:    ((defectdojo_staging_auth_token))
+#   Production: ((defectdojo_production_auth_token))
+# See: https://github.com/cloud-gov/deploy-defectdojo
+defectdojo_enabled: "false"
 defectdojo_url: ((defectdojo_url))
 defectdojo_api_key: ((defectdojo_api_key))
 defectdojo_verify_ssl: "true"
