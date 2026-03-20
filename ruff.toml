@@ -1,0 +1,24 @@
+target-version = "py312"
+line-length = 120
+
+[lint]
+select = [
+    "E",     # pycodestyle errors
+    "W",     # pycodestyle warnings
+    "F",     # pyflakes
+    "I",     # isort
+    "UP",    # pyupgrade
+    "B",     # flake8-bugbear
+    "S",     # flake8-bandit (security)
+    "SIM",   # flake8-simplify
+    "RUF",   # ruff-specific
+]
+ignore = [
+    "S310",  # URL open audit (fetch-bearer-token.py OIDC token endpoint)
+    "S314",  # XML parsing (validate-reports.py checks ZAP XML reports)
+    "S603",  # subprocess call with shell=False (cf CLI invocation)
+    "S607",  # starting a process with a partial path (cf CLI)
+]
+
+[lint.per-file-ignores]
+"ci/scripts/*" = ["S101"]  # allow assert in scripts (used for validation)

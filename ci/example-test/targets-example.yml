@@ -1,0 +1,56 @@
+---
+# Homelab-specific scan targets
+#
+# These targets exercise authenticated scanning against example infrastructure.
+# Used by ci/example-test/pipeline.yml scan-authenticated job.
+#
+# Two auth flows tested:
+#   1. Authentik (static provider) — forward-auth via Caddy
+#   2. CF UAA (cf-uaa provider) — cf auth → cf oauth-token
+
+defaults:
+  enabled: true
+  scan_variant: authenticated
+  auth_mode: bearer
+  report_to_defectdojo: false
+  exclude_paths:
+    - ".*logout.*"
+    - ".*signout.*"
+  scan:
+    minutes: 3
+    max_depth: 2
+    thread_count: 1
+    passive_wait_minutes: 2
+    fail_warn_level: Medium
+    fail_error_level: High
+
+services:
+  # ── Authentik forward-auth targets (static token provider) ──
+  - service_name: example-monitoring
+    context: internal
+    scan_variant: authenticated
+    auth_mode: bearer
+    auth_profile: example-authentik
+    targets:
+      - name: prometheus-authenticated
+        url: https://prometheus.example.internal
+        include_paths:
+          - "^https://prometheus\\.example\\.internal/.*"
+        scan:
+          minutes: 2
+          max_depth: 1
+
+  # ── CF UAA targets (cf-uaa token provider) ──
+  - service_name: example-cf-apps
+    context: external
+    scan_variant: authenticated
+    auth_mode: bearer
+    auth_profile: example-cf
+    targets:
+      - name: cf-homepage-authenticated
+        url: https://homepage.apps.cf.example.internal
+        include_paths:
+          - "^https://app\\.cf\\.example\\.internal/.*"
+        scan:
+          minutes: 2
+          max_depth: 2
