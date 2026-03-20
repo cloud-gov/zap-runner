@@ -43,9 +43,8 @@
 pipeline_repo_uri: ((pipeline_repo_uri))
 pipeline_repo_branch: 2026-03-18_update
 
-# Docker image — stored in cloud-gov ECR (us-gov-west-1)
-image_repository: zap-runner
-runner_tag: "latest"
+# Docker image: zap-runner-image resource pulls from ECR directly
+# (no image_repository/runner_tag vars needed — defined in pipeline resources)
 cf_cli_version: "8.18.0"
 
 # Scan schedule
