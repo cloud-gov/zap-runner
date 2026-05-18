@@ -73,8 +73,8 @@ RUN apt-get update && \
   curl -fsSL -L "https://github.com/cloudfoundry/cli/releases/download/v${CF_CLI_VERSION}/cf8-cli_${CF_CLI_VERSION}_linux_x86-64.tgz" \
   -o /tmp/cf-cli.tgz && \
   tar -xzf /tmp/cf-cli.tgz -C /usr/local/bin && \
-  chmod 0755 /usr/local/bin/cf /usr/local/bin/cf8 && \
   chown root:root /usr/local/bin/cf /usr/local/bin/cf8 && \
+  chmod 0755 /usr/local/bin/cf /usr/local/bin/cf8 && \
   rm -f /usr/local/bin/NOTICE /usr/local/bin/LICENSE && \
   rm -f /tmp/cf-cli.tgz && \
   # Cleanup
