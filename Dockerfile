@@ -12,7 +12,7 @@
 
 ARG base_image
 ARG ZAP_IMAGE=zaproxy/zap-stable:latest
-ARG CF_CLI_VERSION=8.18.3
+ARG CF_CLI_VERSION=8.18.4
 
 ################################################################################
 # STAGE 1 — ZAP BUILDER (copy ZAP installation from official image)
