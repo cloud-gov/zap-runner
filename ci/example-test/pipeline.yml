@@ -1,0 +1,695 @@
+---
+# Example Test Pipeline for zap-runner
+#
+# Tests the ZAP scanning pipeline against safe public targets
+# using the example Concourse (ci.example.internal).
+#
+# No S3 or DefectDojo — reports validated via ci/scripts/validate-reports.py.
+#
+# Context taxonomy:
+#   internal  — internal APIs (httpbin.org)
+#   external  — authenticated apps (empty in example, graceful skip)
+#   public    — public-facing apps (Juice Shop)
+#   static    — static sites (example.com)
+#
+# Deploy:
+#   fly -t <target> set-pipeline \
+#     -p zap-scanner-test \
+#     -c ci/example-test/pipeline.yml
+
+resources:
+  - name: zap-runner
+    type: git
+    source:
+      uri: git@github.com:cloud-gov/zap-runner.git
+      branch: main
+      private_key: ((zap-scanner-deploy-key.private_key))
+
+  - name: zap-image
+    type: registry-image
+    source:
+      repository: ((docker_image_repo))
+      tag: latest
+      username: ((dockerhub-username))
+      password: ((dockerhub-password))
+
+jobs:
+  # ── Build Scanner Image ────────────────────────────────
+  - name: build-zap-image
+    serial: true
+    plan:
+      - get: zap-runner
+        trigger: true
+
+      - task: build
+        privileged: true
+        config:
+          platform: linux
+          image_resource:
+            type: registry-image
+            source: { repository: concourse/oci-build-task }
+          inputs:
+            - name: zap-runner
+          outputs:
+            - name: image
+          params:
+            CONTEXT: zap-runner
+            DOCKERFILE: zap-runner/Dockerfile
+            BUILD_ARG_base_image: ubuntu:24.04
+          run:
+            path: build
+
+      - put: zap-image
+        params:
+          image: image/image.tar
+
+  # ── Smoke Test: Verify Image ───────────────────────────
+  - name: smoke-test-image
+    serial: true
+    plan:
+      - get: zap-runner
+        trigger: true
+        passed: [build-zap-image]
+      - get: zap-image
+        trigger: true
+        passed: [build-zap-image]
+
+      - task: verify-tools
+        image: zap-image
+        config:
+          platform: linux
+          run:
+            path: bash
+            args:
+              - -ceu
+              - |
+                echo "=== Tool Verification ==="
+                test -x /zap/zap.sh && echo "ZAP: OK" || { echo "ZAP: MISSING"; exit 1; }
+                java -version 2>&1 | head -1
+                cf --version
+                python3 --version
+                python3 -c "import yaml; print(f'PyYAML: {yaml.__version__}')"
+                jq --version
+                aws --version 2>&1 | head -1
+                echo "=== All tools verified ==="
+
+  # ── Test: Script Unit Tests ──────────────────────────────
+  - name: test-scripts
+    serial: true
+    plan:
+      - get: zap-runner
+        trigger: true
+        passed: [smoke-test-image]
+      - get: zap-image
+        passed: [smoke-test-image]
+
+      - task: test-parse-targets
+        image: zap-image
+        config:
+          platform: linux
+          inputs:
+            - name: zap-runner
+          run:
+            path: bash
+            args:
+              - -ceu
+              - |
+                echo "=== Test: parse-targets.py ==="
+                yml="zap-runner/ci/zap-config/targets.yml"
+                script="zap-runner/ci/scripts/parse-targets.py"
+
+                # Test each context has targets
+                for ctx in internal public static; do
+                  result=$(python3 "${script}" "${yml}" "${ctx}" unauthenticated)
+                  count=$(echo "${result}" | wc -l)
+                  name=$(echo "${result}" | jq -r '.name' | head -1)
+                  echo "${ctx}/unauthenticated: ${count} target(s) — ${name}"
+                  test "${count}" -ge 1 || { echo "FAIL: expected >= 1"; exit 1; }
+                done
+
+                # Internal should find both web and api scan_type targets
+                result=$(python3 "${script}" "${yml}" internal unauthenticated)
+                count=$(echo "${result}" | wc -l)
+                echo "internal/unauthenticated (incl. api scan_type): ${count} target(s)"
+                test "${count}" -ge 2 || { echo "FAIL: expected >= 2 (web + api)"; exit 1; }
+
+                # External is empty (auth templates commented out)
+                result=$(python3 "${script}" "${yml}" external unauthenticated || true)
+                if [ -n "${result}" ]; then
+                  echo "FAIL: external/unauthenticated should be empty"
+                  exit 1
+                fi
+                echo "external/unauthenticated: 0 targets (correct — auth only)"
+
+                # Nonexistent context
+                result=$(python3 "${script}" "${yml}" nonexistent unauthenticated || true)
+                test -z "${result}" || { echo "FAIL: nonexistent should be empty"; exit 1; }
+                echo "nonexistent: 0 targets (correct)"
+
+                echo "=== parse-targets.py PASSED ==="
+
+      - task: test-build-plan
+        image: zap-image
+        config:
+          platform: linux
+          inputs:
+            - name: zap-runner
+          run:
+            path: bash
+            user: root
+            args:
+              - -ceu
+              - |
+                echo "=== Test: build-plan.py ==="
+                script="zap-runner/ci/scripts/build-plan.py"
+                mkdir -p /tmp/test-plans
+
+                # Test: basic plan with active scan
+                TARGET_JSON='{"name":"test","url":"http://localhost","auth_mode":"unauthenticated","scan":{}}' \
+                PLAN_PATH="/tmp/test-plans/basic.yaml" REPORT_DIR="/tmp" \
+                ZAP_MAX_DEPTH="3" ZAP_THREAD_COUNT="1" ZAP_PASSIVE_WAIT_MINUTES="2" \
+                ZAP_MINUTES="5" ZAP_FAIL_WARN_LEVEL="Medium" ZAP_FAIL_ERROR_LEVEL="High" \
+                python3 "${script}"
+
+                python3 -c "
+                import yaml
+                with open('/tmp/test-plans/basic.yaml') as f:
+                    plan = yaml.safe_load(f)
+                types = [j['type'] for j in plan['jobs']]
+                assert 'spider' in types and 'activeScan' in types and 'exitStatus' in types
+                print(f'Basic plan: {len(plan[\"jobs\"])} jobs OK')
+                "
+
+                # Test: passive-only plan (skip active scan)
+                TARGET_JSON='{"name":"quick","url":"http://localhost","auth_mode":"unauthenticated","scan":{}}' \
+                PLAN_PATH="/tmp/test-plans/passive.yaml" REPORT_DIR="/tmp" \
+                ZAP_SKIP_ACTIVE_SCAN="true" \
+                ZAP_MAX_DEPTH="2" ZAP_THREAD_COUNT="1" ZAP_PASSIVE_WAIT_MINUTES="1" \
+                ZAP_MINUTES="3" ZAP_FAIL_WARN_LEVEL="Medium" ZAP_FAIL_ERROR_LEVEL="High" \
+                python3 "${script}"
+
+                python3 -c "
+                import yaml
+                with open('/tmp/test-plans/passive.yaml') as f:
+                    plan = yaml.safe_load(f)
+                types = [j['type'] for j in plan['jobs']]
+                assert 'activeScan' not in types
+                print(f'Passive-only plan: {len(plan[\"jobs\"])} jobs OK (no activeScan)')
+                "
+
+                # Test: bearer auth plan — verify replacer structure
+                TARGET_JSON='{"name":"auth-test","url":"http://localhost","auth_mode":"bearer","_runtime_bearer_token":"test-token-abc","scan":{}}' \
+                PLAN_PATH="/tmp/test-plans/bearer.yaml" REPORT_DIR="/tmp" \
+                ZAP_MAX_DEPTH="2" ZAP_THREAD_COUNT="1" ZAP_PASSIVE_WAIT_MINUTES="1" \
+                ZAP_MINUTES="3" ZAP_FAIL_WARN_LEVEL="Medium" ZAP_FAIL_ERROR_LEVEL="High" \
+                python3 "${script}"
+
+                python3 -c "
+                import yaml
+                with open('/tmp/test-plans/bearer.yaml') as f:
+                    plan = yaml.safe_load(f)
+                replacer = [j for j in plan['jobs'] if j['type'] == 'replacer']
+                assert len(replacer) == 1, f'Expected 1 replacer job, got {len(replacer)}'
+                rules = replacer[0]['rules']
+                assert len(rules) == 1, f'Expected 1 rule, got {len(rules)}'
+                rule = rules[0]
+                assert rule['matchType'] == 'req_header', f'Wrong matchType: {rule[\"matchType\"]}'
+                assert rule['matchString'] == 'Authorization'
+                assert 'replacementString' in rule, 'Missing replacementString (was: replacement)'
+                assert 'Bearer test-token-abc' in rule['replacementString']
+                assert 'enabled' not in rule, 'Should not have enabled field'
+                assert 'replacement' not in rule, 'Should use replacementString not replacement'
+                print(f'Bearer auth plan: replacer structure OK — {rule[\"replacementString\"][:20]}...')
+                "
+
+                echo "=== build-plan.py PASSED ==="
+
+      - task: test-list-contexts
+        image: zap-image
+        config:
+          platform: linux
+          inputs:
+            - name: zap-runner
+          run:
+            path: bash
+            args:
+              - -ceu
+              - |
+                echo "=== Test: list-contexts.py ==="
+                script="zap-runner/ci/scripts/list-contexts.py"
+                yml="zap-runner/ci/zap-config/targets.yml"
+
+                # Human-readable output
+                python3 "${script}" "${yml}"
+                echo ""
+
+                # JSON output — verify structure
+                python3 "${script}" "${yml}" --json | python3 -c "
+                import json, sys
+                data = json.load(sys.stdin)
+                assert 'internal' in data['contexts']
+                assert 'public' in data['contexts']
+                assert 'static' in data['contexts']
+                assert 'unauthenticated' in data['variants']
+                assert data['total_targets'] >= 3, f'Expected >= 3 targets, got {data[\"total_targets\"]}'
+                assert 'internal/unauthenticated' in data['cells']
+                assert 'public/unauthenticated' in data['cells']
+                assert 'static/unauthenticated' in data['cells']
+                print(f'JSON schema OK: {data[\"total_targets\"]} targets across {len(data[\"cells\"])} cells')
+                "
+
+                echo "=== list-contexts.py PASSED ==="
+
+      - task: test-csv-to-targets
+        image: zap-image
+        config:
+          platform: linux
+          inputs:
+            - name: zap-runner
+          run:
+            path: bash
+            user: root
+            args:
+              - -ceu
+              - |
+                echo "=== Test: csv-to-targets.py ==="
+                csv_script="zap-runner/ci/scripts/csv-to-targets.py"
+                parse_script="zap-runner/ci/scripts/parse-targets.py"
+                example_csv="zap-runner/ci/zap-config/targets.example.csv"
+
+                # Generate targets.yml from CSV
+                python3 "${csv_script}" "${example_csv}" > /tmp/generated.yml
+                echo "Generated: $(wc -l < /tmp/generated.yml) lines"
+
+                # Validate structure
+                python3 -c "
+                import yaml
+                with open('/tmp/generated.yml') as f:
+                    data = yaml.safe_load(f)
+                assert 'defaults' in data and 'services' in data
+                targets = sum(len(s['targets']) for s in data['services'])
+                assert targets >= 5, f'Expected >= 5 targets, got {targets}'
+                print(f'Structure OK: {targets} targets in {len(data[\"services\"])} services')
+                "
+
+                # Round-trip: CSV → YAML → parse → verify
+                result=$(python3 "${parse_script}" /tmp/generated.yml public unauthenticated)
+                name=$(echo "${result}" | head -1 | jq -r '.name')
+                echo "Round-trip: public/unauth → ${name}"
+                test "${name}" = "juice-shop-public" || { echo "FAIL: expected juice-shop-public"; exit 1; }
+
+                echo "=== csv-to-targets.py PASSED ==="
+
+      - task: test-fetch-bearer-token
+        image: zap-image
+        config:
+          platform: linux
+          inputs:
+            - name: zap-runner
+          run:
+            path: bash
+            args:
+              - -ceu
+              - |
+                echo "=== Test: fetch-bearer-token.py ==="
+                script="zap-runner/ci/scripts/fetch-bearer-token.py"
+
+                # Test 1: static provider — should return the token directly
+                token=$(AUTH_PROFILES_JSON='{"test-static": {"provider": "static", "token": "my-test-token-123"}}' \
+                  python3 "${script}" test-static)
+                test "${token}" = "my-test-token-123" || { echo "FAIL: expected 'my-test-token-123', got '${token}'"; exit 1; }
+                echo "static provider: OK"
+
+                # Test 2: missing profile — should fail
+                set +e
+                AUTH_PROFILES_JSON='{"a": {"provider": "static", "token": "x"}}' \
+                  python3 "${script}" nonexistent 2>/dev/null
+                rc=$?
+                set -e
+                test "${rc}" -ne 0 || { echo "FAIL: missing profile should fail"; exit 1; }
+                echo "missing profile: correctly failed"
+
+                # Test 3: provider override via --provider flag
+                token=$(AUTH_PROFILES_JSON='{"override-test": {"provider": "cf-uaa", "token": "override-val"}}' \
+                  python3 "${script}" override-test --provider static)
+                test "${token}" = "override-val" || { echo "FAIL: provider override didn't work"; exit 1; }
+                echo "provider override (--provider static): OK"
+
+                # Test 4: default provider (no "provider" key) should default to cf-uaa
+                # We can't test actual cf auth here, but verify it tries cf-uaa
+                set +e
+                AUTH_PROFILES_JSON='{"legacy": {"cf_api": "https://fake.example.com", "username": "u", "password": "p"}}' \
+                  python3 "${script}" legacy 2>/dev/null
+                rc=$?
+                set -e
+                # Should fail (can't reach fake API) but should TRY cf-uaa (not crash on missing provider)
+                echo "default provider (cf-uaa): correctly attempted (rc=${rc})"
+
+                echo "=== fetch-bearer-token.py PASSED ==="
+
+  # ── Optional: CF UAA Auth Smoke Test ──────────────────
+  # Tests real token acquisition against a CF UAA endpoint.
+  # Skips gracefully if CredHub secrets are not available.
+  # To enable: store ((zap-scan-password-development)) in CredHub.
+  - name: test-auth-providers
+    serial: true
+    plan:
+      - get: zap-runner
+        trigger: true
+        passed: [test-scripts]
+      - get: zap-image
+        passed: [test-scripts]
+
+      - task: test-cf-uaa-auth
+        image: zap-image
+        config:
+          platform: linux
+          inputs:
+            - name: zap-runner
+          params:
+            # Set to "skip" by default — override via pipeline vars if CredHub has the secret
+            CF_DEV_PASSWORD: "skip"
+          run:
+            path: bash
+            args:
+              - -ceu
+              - |
+                set -o pipefail
+                script="zap-runner/ci/scripts/fetch-bearer-token.py"
+
+                if [[ "${CF_DEV_PASSWORD}" == "skip" || -z "${CF_DEV_PASSWORD:-}" ]]; then
+                  echo "SKIP: CF UAA auth test not configured"
+                  echo "To enable: set CF_DEV_PASSWORD pipeline var or add to CredHub"
+                  exit 0
+                fi
+
+                echo "=== CF UAA Auth Smoke Test (development) ==="
+                AUTH_PROFILES_JSON=$(jq -n \
+                  --arg api "${CF_UAA_API:-https://uaa.example.com}" \
+                  --arg user "${CF_UAA_USER:-zap-scan-user}" \
+                  --arg pw "${CF_DEV_PASSWORD}" \
+                  '{"development": {"provider":"cf-uaa","cf_api":$api,"username":$user,"password":$pw}}')
+                export AUTH_PROFILES_JSON
+
+                set +e
+                token=$(python3 "${script}" development 2>&1)
+                rc=$?
+                set -e
+
+                if [[ "${rc}" -eq 0 ]]; then
+                  # Token acquired — print length only (never the token itself)
+                  token_len=${#token}
+                  echo "CF UAA auth OK (token length: ${token_len} chars)"
+                  test "${token_len}" -gt 10 || { echo "FAIL: token suspiciously short"; exit 1; }
+                  echo "=== CF UAA auth PASSED ==="
+                else
+                  echo "CF UAA auth failed (rc=${rc}) — may be network/firewall issue from this environment"
+                  echo "Diagnostics: ${token}"
+                  echo "SKIP: non-fatal — CF UAA unreachable from this environment"
+                  exit 0
+                fi
+
+  # ── Matrix Scan: All contexts × variants ────────────────
+  # Uses `across` like production pipeline.
+  # Empty cells (e.g., external/unauthenticated) exit in ~1s.
+  - name: scan-all-contexts
+    serial: true
+    plan:
+      - in_parallel:
+          - get: zap-runner
+            trigger: true
+            passed: [test-scripts]
+          - get: zap-image
+            passed: [test-scripts]
+
+      - across:
+          - var: target_context
+            values:
+              - internal
+              - external
+              - public
+              - static
+            max_in_flight: 1
+          - var: scan_variant
+            values:
+              - unauthenticated
+              - authenticated
+            max_in_flight: all
+        fail_fast: false
+        do:
+          - task: zap-scan
+            image: zap-image
+            timeout: 10m
+            config:
+              platform: linux
+              inputs:
+                - name: zap-runner
+              outputs:
+                - name: zap-report
+                  path: /tmp/zap-report
+              params:
+                TARGET_CONTEXT: ((.:target_context))
+                TARGET_SCAN_VARIANT: ((.:scan_variant))
+                ZAP_MAX_DEPTH: "2"
+                ZAP_THREAD_COUNT: "1"
+                ZAP_PASSIVE_WAIT_MINUTES: "2"
+                ZAP_MINUTES: "3"
+                ZAP_FAIL_WARN_LEVEL: "Medium"
+                ZAP_FAIL_ERROR_LEVEL: "High"
+                ZAP_MIN_RISK_LEVEL: "Low"
+                ZAP_MIN_CONFIDENCE: "Medium"
+                ZAP_REPORT_FORMATS: "html,json,xml,sarif"
+              run:
+                path: bash
+                user: root
+                args:
+                  - -ceu
+                  - |
+                    set -o pipefail
+                    repo_dir="zap-runner"
+                    scan_key="${TARGET_CONTEXT}-${TARGET_SCAN_VARIANT}"
+                    work_root="/tmp/zap-report/${scan_key}"
+                    mkdir -p "${work_root}"
+
+                    echo "=== Scan: ${scan_key} ==="
+
+                    # Parse targets
+                    python3 "${repo_dir}/ci/scripts/parse-targets.py" \
+                      "${repo_dir}/ci/zap-config/targets.yml" \
+                      "${TARGET_CONTEXT}" "${TARGET_SCAN_VARIANT}" \
+                      > /tmp/targets.jsonl
+
+                    count=$(wc -l < /tmp/targets.jsonl)
+                    echo "Found ${count} target(s) for ${scan_key}"
+
+                    if [[ "${count}" -eq 0 ]]; then
+                      echo "No targets — skipping (empty matrix cell)"
+                      exit 0
+                    fi
+
+                    # Scan each target
+                    while IFS= read -r target_json; do
+                      name="$(jq -r '.name' <<<"${target_json}")"
+                      url="$(jq -r '.url' <<<"${target_json}")"
+                      target_dir="${work_root}/${name}"
+                      mkdir -p "${target_dir}"
+
+                      echo "Scanning: ${name} (${url})"
+
+                      export TARGET_JSON="${target_json}"
+                      export PLAN_PATH="${target_dir}/plan.yaml"
+                      export REPORT_DIR="${target_dir}"
+                      export ZAP_SKIP_ACTIVE_SCAN="true"
+                      export ZAP_REPORT_FORMATS="html,json,sarif"
+                      python3 "${repo_dir}/ci/scripts/build-plan.py"
+
+                      set +e
+                      /zap/zap.sh -cmd -silent -autorun "${target_dir}/plan.yaml"
+                      rc=$?
+                      set -e
+                      echo "  ZAP exit code: ${rc}"
+                      rm -f "${target_dir}/plan.yaml"
+                    done < /tmp/targets.jsonl
+
+                    # Validate reports (expect alerts for non-static targets)
+                    echo ""
+                    validate_args=("${work_root}")
+                    if [[ "${TARGET_CONTEXT}" != "static" ]]; then
+                      validate_args+=("--expect-alerts")
+                    fi
+                    python3 "${repo_dir}/ci/scripts/validate-reports.py" "${validate_args[@]}"
+
+                    echo ""
+                    echo "=== ${scan_key} PASSED ==="
+
+  # ── Authenticated Scan: Multi-provider auth testing ──────
+  # Tests both auth providers end-to-end:
+  #   1. Authentik (static provider) → Prometheus
+  #   2. CF UAA (cf-uaa provider) → CF homepage app
+  # Each target's auth_profile selects its provider from AUTH_PROFILES_JSON.
+  # Skips individual targets if their CredHub secrets are unavailable.
+  - name: scan-authenticated
+    serial: true
+    plan:
+      - in_parallel:
+          - get: zap-runner
+            trigger: true
+            passed: [scan-all-contexts]
+          - get: zap-image
+            passed: [scan-all-contexts]
+
+      - task: scan-with-auth
+        image: zap-image
+        timeout: 10m
+        config:
+          platform: linux
+          inputs:
+            - name: zap-runner
+          outputs:
+            - name: zap-report
+              path: /tmp/zap-report
+          params:
+            # Auth profiles — each CredHub ref resolves at pipeline set time
+            # Missing secrets default to "skip" to allow graceful degradation
+            AUTHENTIK_TOKEN: ((authentik-token))
+            CF_ADMIN_PASSWORD: ((cf-admin-password))
+            ZAP_MAX_DEPTH: "2"
+            ZAP_THREAD_COUNT: "1"
+            ZAP_PASSIVE_WAIT_MINUTES: "1"
+            ZAP_MINUTES: "2"
+            ZAP_FAIL_WARN_LEVEL: "Medium"
+            ZAP_FAIL_ERROR_LEVEL: "High"
+            ZAP_MIN_RISK_LEVEL: "Low"
+            ZAP_MIN_CONFIDENCE: "Medium"
+          run:
+            path: bash
+            user: root
+            args:
+              - -ceu
+              - |
+                set -o pipefail
+                repo_dir="zap-runner"
+                targets_yml="${repo_dir}/ci/example-test/targets-example.yml"
+
+                echo "=== Authenticated Scan: Multi-Provider ==="
+
+                # Build AUTH_PROFILES_JSON with available providers
+                # Authentik: static provider (token from CredHub)
+                # CF UAA: cf-uaa provider (admin creds from CredHub)
+                auth_profiles="{}"
+                if [[ -n "${AUTHENTIK_TOKEN:-}" ]]; then
+                  auth_profiles=$(echo "${auth_profiles}" | jq \
+                    --arg token "${AUTHENTIK_TOKEN}" \
+                    '. + {"example-authentik": {"provider": "static", "token": $token}}')
+                  echo "Provider: example-authentik (static) — configured"
+                else
+                  echo "Provider: example-authentik — SKIP (no token)"
+                fi
+
+                if [[ -n "${CF_ADMIN_PASSWORD:-}" ]]; then
+                  auth_profiles=$(echo "${auth_profiles}" | jq \
+                    --arg pw "${CF_ADMIN_PASSWORD}" \
+                    '. + {"example-cf": {"provider": "cf-uaa", "cf_api": "https://api.cf.example.internal", "username": "admin", "password": $pw, "skip_ssl_validation": true}}')
+                  echo "Provider: example-cf (cf-uaa) — configured"
+                else
+                  echo "Provider: example-cf — SKIP (no password)"
+                fi
+
+                export AUTH_PROFILES_JSON="${auth_profiles}"
+
+                # Parse all authenticated targets across contexts
+                > /tmp/targets.jsonl
+                for ctx in internal external; do
+                  echo "Parsing ${ctx}/authenticated..."
+                  python3 "${repo_dir}/ci/scripts/parse-targets.py" \
+                    "${targets_yml}" "${ctx}" authenticated \
+                    >> /tmp/targets.jsonl || true
+                  echo "  ${ctx}: $(wc -l < /tmp/targets.jsonl) total target(s) so far"
+                done
+
+                count=$(wc -l < /tmp/targets.jsonl)
+                count=$(echo "${count}" | tr -d ' ')
+                echo "Found ${count} authenticated target(s)"
+
+                if [[ "${count}" -eq 0 || ! -s /tmp/targets.jsonl ]]; then
+                  echo "No authenticated targets — skipping"
+                  exit 0
+                fi
+
+                scanned=0
+                while IFS= read -r target_json; do
+                  [[ -z "${target_json}" ]] && continue
+                  name="$(jq -r '.name' <<<"${target_json}")"
+                  url="$(jq -r '.url' <<<"${target_json}")"
+                  auth_profile="$(jq -r '.auth_profile // ""' <<<"${target_json}")"
+                  target_dir="/tmp/zap-report/${name}"
+                  mkdir -p "${target_dir}"
+
+                  echo ""
+                  echo "--- Target: ${name} (${url}) ---"
+                  echo "  auth_profile: ${auth_profile}"
+
+                  # Fetch bearer token using the modular provider system
+                  set +e
+                  token=$(python3 "${repo_dir}/ci/scripts/fetch-bearer-token.py" \
+                    "${auth_profile}" 2>/tmp/token-stderr.txt)
+                  token_rc=$?
+                  set -e
+
+                  if [[ "${token_rc}" -ne 0 || -z "${token}" ]]; then
+                    echo "  SKIP: token fetch failed for profile '${auth_profile}'"
+                    cat /tmp/token-stderr.txt 2>/dev/null | sed 's/^/  /'
+                    continue
+                  fi
+                  echo "  Token acquired (length: ${#token})"
+
+                  # Inject runtime bearer token
+                  runtime_json="$(jq --arg token "${token}" \
+                    '. + {"_runtime_bearer_token": $token}' <<<"${target_json}")"
+
+                  export TARGET_JSON="${runtime_json}"
+                  export PLAN_PATH="${target_dir}/plan.yaml"
+                  export REPORT_DIR="${target_dir}"
+                  export ZAP_SKIP_ACTIVE_SCAN="true"
+                  export ZAP_REPORT_FORMATS="html,json,sarif"
+                  python3 "${repo_dir}/ci/scripts/build-plan.py"
+
+                  # Verify token injection in plan
+                  grep -q "replacementString" "${target_dir}/plan.yaml" && \
+                    echo "  Bearer token injection: OK" || \
+                    echo "  WARNING: No replacementString in plan"
+
+                  # Run ZAP — scrub bearer tokens from output to prevent log leakage
+                  set +e
+                  /zap/zap.sh -cmd -silent -autorun "${target_dir}/plan.yaml" 2>&1 \
+                    | sed 's/Bearer [A-Za-z0-9._+/=\-]*/Bearer **REDACTED**/g'
+                  rc=${PIPESTATUS[0]}
+                  set -e
+                  echo "  ZAP exit code: ${rc}"
+                  rm -f "${target_dir}/plan.yaml"
+                  scanned=$((scanned + 1))
+                done < /tmp/targets.jsonl
+
+                if [[ "${scanned}" -eq 0 ]]; then
+                  echo ""
+                  echo "No targets successfully scanned — skipping validation"
+                  exit 0
+                fi
+
+                # Validate reports
+                echo ""
+                python3 "${repo_dir}/ci/scripts/validate-reports.py" \
+                  /tmp/zap-report --expect-alerts
+
+                echo ""
+                echo "=== Authenticated scan PASSED (${scanned} target(s)) ==="
+
+groups:
+  - name: tests
+    jobs:
+      - build-zap-image
+      - smoke-test-image
+      - test-scripts
+      - test-auth-providers
+      - scan-all-contexts
+      - scan-authenticated

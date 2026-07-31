@@ -1,0 +1,7 @@
+# Homelab test pipeline variables
+# Deploy with: fly -t <target> set-pipeline -p zap-scanner-test -c ci/example-test/pipeline.yml -l ci/example-test/vars.yml
+#
+# CredHub secrets (auto-interpolated by Concourse):
+#   ((dockerhub-username))   - Docker Hub username for your Docker Hub org
+#   ((dockerhub-password))   - Docker Hub PAT
+#   ((github-deploy-key))    - SSH key for zap-runner repo

@@ -1,0 +1,10 @@
+---
+# Hadolint configuration
+# See: https://github.com/hadolint/hadolint#configure
+ignored:
+  # Base image tags are parameterized via build args — can't pin inline
+  - DL3006
+  # apt packages deliberately unpinned for ZAP compatibility across versions
+  - DL3008
+  # Last USER is zap (non-root), but hadolint may misread multi-stage builds
+  - DL3002

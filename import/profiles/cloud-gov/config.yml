@@ -1,0 +1,74 @@
+---
+# Cloud-Gov DAST Scanning Configuration (zap-runner format)
+#
+# Generated from cloud-gov/zap-runner config.
+# Replace ((var)) references with your CredHub paths.
+#
+# Deploy:
+#   fly -t <target> set-pipeline -p zap-scanner \
+#     -c ci/pipeline.yml \
+#     -l import/profiles/cloud-gov/config.yml
+
+repo_name: zap-runner
+runner_tag: "stable"
+cf_cli_version: "8.18.0"
+
+# Scan schedule
+scan_schedule_interval: 24h
+
+# AWS region for S3 report storage
+aws_region: us-gov-west-1
+
+# S3 report storage
+s3_bucket: ((zap_reports_bucket))
+s3_prefix: zap
+
+# Scan defaults — tuned for production scanning
+zap_enforce_failure: "false"
+zap_minutes: "20"
+zap_max_depth: "5"
+zap_thread_count: "2"
+zap_passive_wait_minutes: "10"
+zap_fail_warn_level: "Medium"
+zap_fail_error_level: "High"
+
+# Finding filters
+zap_min_risk_level: "Low"
+zap_min_confidence: "Medium"
+zap_report_formats: "html,json,xml,sarif"
+
+# Authentication profiles — CF UAA bearer token per environment
+# CredHub secrets auto-interpolated by Concourse at pipeline set time.
+auth_profiles_json: |
+  {
+    "development": {
+      "provider": "cf-uaa",
+      "cf_api": "((cf_api_dev))",
+      "username": "((cf_username_dev))",
+      "password": "((cf_password_dev))"
+    },
+    "staging": {
+      "provider": "cf-uaa",
+      "cf_api": "((cf_api_staging))",
+      "username": "((cf_username_staging))",
+      "password": "((cf_password_staging))"
+    },
+    "production": {
+      "provider": "cf-uaa",
+      "cf_api": "((cf_api_prod))",
+      "username": "((cf_username_prod))",
+      "password": "((cf_password_prod))"
+    }
+  }
+
+# DefectDojo integration
+defectdojo_enabled: "true"
+defectdojo_url: ((defectdojo_url))
+defectdojo_api_key: ((defectdojo_api_key))
+defectdojo_verify_ssl: "true"
+defectdojo_scan_type: "ZAP Scan"
+defectdojo_minimum_severity: "Info"
+defectdojo_active: "true"
+defectdojo_verified: "true"
+defectdojo_close_old_findings: "false"
+defectdojo_auto_create_context: "true"

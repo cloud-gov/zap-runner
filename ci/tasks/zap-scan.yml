@@ -10,71 +10,207 @@ image_resource:
     tag: ((runner_tag))
 
 inputs:
-  - name: ((repo_name))
+  - name: zap-runner
 
 outputs:
   - name: zap-report
-    path: /zap/wrk
+    path: /tmp/zap-report
+  - name: scan-state
+    path: /tmp/scan-state
 
 params:
-  TARGET_CONTEXT: # one of internal, external, pages, unauthenticated
-  CREDHB_CRED: ((repo_name))/ci/config.yml
+  TARGET_CONTEXT:
+  TARGET_SCAN_VARIANT:
+  AUTH_PROFILES_JSON:
+  ZAP_ENFORCE_FAILURE: "false"
+  ZAP_MINUTES: "10"
+  ZAP_MAX_DEPTH: "5"
+  ZAP_THREAD_COUNT: "2"
+  ZAP_PASSIVE_WAIT_MINUTES: "5"
+  ZAP_FAIL_WARN_LEVEL: "Medium"
+  ZAP_FAIL_ERROR_LEVEL: "High"
+  ZAP_MIN_RISK_LEVEL: "Low"
+  ZAP_MIN_CONFIDENCE: "Medium"
+  ZAP_REPORT_FORMATS: "html,json,xml,sarif"
 
 run:
   path: bash
   args:
-    - -ceux
+    - -ceu
     - |
-      #!/usr/bin/env bash
+      set -o pipefail
+      shopt -s inherit_errexit
 
-      echo "Starting DAST for context '${TARGET_CONTEXT}'"
+      repo_dir="zap-runner"
+      targets_yml="${repo_dir}/ci/zap-config/targets.yml"
+      scan_key="${TARGET_CONTEXT}-${TARGET_SCAN_VARIANT}"
+      work_root="/tmp/zap-report/${scan_key}"
+      state_root="/tmp/scan-state/${scan_key}"
 
-      CREDS_JSON="$CREDHB_CRED"
+      mkdir -p "${work_root}" "${state_root}"
 
-      # Copy config file to expected directory
-      cp ((repo_name))/ci/zap-config/zap.yaml /zap/wrk/zap-config/zap.yaml
+      echo "============================================"
+      echo "  ZAP Automation Scan"
+      echo "  Context:  ${TARGET_CONTEXT}"
+      echo "  Variant:  ${TARGET_SCAN_VARIANT}"
+      echo "  Key:      ${scan_key}"
+      echo "============================================"
 
-      # Filter URLs for this context
-      mapfile -t URLS < <(
-        tail -n +2 ((repo_name))/ci/zap-config/urls.csv | \
-        awk -F',' -v ctx="$TARGET_CONTEXT" '$1==ctx { print $2 }'
-      )
+      if [[ ! -f "${targets_yml}" ]]; then
+        echo "Missing target inventory: ${targets_yml}" >&2
+        exit 1
+      fi
 
-      if [ ${#URLS[@]} -eq 0 ]; then
-        echo "No URLs for context '$TARGET_CONTEXT', skipping."
+      if ! jq -e . >/dev/null 2>&1 <<<"${AUTH_PROFILES_JSON}"; then
+        echo "AUTH_PROFILES_JSON is not valid JSON" >&2
+        exit 1
+      fi
+
+      overall_failure="false"
+      scanned_any="false"
+
+      # ── Auth helper: fetch bearer token via modular provider ──
+      # Uses ci/scripts/fetch-bearer-token.py which supports:
+      #   cf-uaa, oidc-client-credentials, static
+      # Token caching is handled in-memory per profile.
+      declare -A TOKEN_CACHE=()
+
+      fetch_bearer_token() {
+        local profile="$1"
+        if [[ -n "${TOKEN_CACHE[$profile]:-}" ]]; then
+          printf '%s' "${TOKEN_CACHE[$profile]}"
+          return 0
+        fi
+        local token
+        token="$(AUTH_PROFILES_JSON="${AUTH_PROFILES_JSON}" \
+          python3 "${repo_dir}/ci/scripts/fetch-bearer-token.py" "${profile}")"
+        if [[ -z "${token}" ]]; then
+          echo "Failed to fetch token for profile '${profile}'" >&2
+          return 1
+        fi
+        TOKEN_CACHE["${profile}"]="${token}"
+        printf '%s' "${token}"
+      }
+
+      # ── Parse targets from YAML ──────────────────────────
+      python3 "${repo_dir}/ci/scripts/parse-targets.py" \
+        "${targets_yml}" "${TARGET_CONTEXT}" "${TARGET_SCAN_VARIANT}" \
+        > "${state_root}/targets.jsonl"
+
+      if [[ ! -s "${state_root}/targets.jsonl" ]]; then
+        echo "No enabled targets found for scan key '${scan_key}'"
         exit 0
       fi
 
-      # Extract credentials for this context (may be empty)
-      CLIENT_ID=$(jq -r --arg ctx "$TARGET_CONTEXT" '.[$ctx].client_id // empty' <<<"$CREDS_JSON")
-      CLIENT_SECRET=$(jq -r --arg ctx "$TARGET_CONTEXT" '.[$ctx].client_secret // empty' <<<"$CREDS_JSON")
-      TOKEN_URI=$(jq -r --arg ctx "$TARGET_CONTEXT" '.[$ctx].token_uri // empty' <<<"$CREDS_JSON")
+      # ── Build ZAP Automation Framework plan ──────────────
+      build_plan() {
+        local target_json="$1" plan_path="$2" report_dir="$3"
+        TARGET_JSON="${target_json}" \
+        PLAN_PATH="${plan_path}" \
+        REPORT_DIR="${report_dir}" \
+        ZAP_MINUTES="${ZAP_MINUTES}" \
+        ZAP_MAX_DEPTH="${ZAP_MAX_DEPTH}" \
+        ZAP_THREAD_COUNT="${ZAP_THREAD_COUNT}" \
+        ZAP_PASSIVE_WAIT_MINUTES="${ZAP_PASSIVE_WAIT_MINUTES}" \
+        ZAP_FAIL_WARN_LEVEL="${ZAP_FAIL_WARN_LEVEL}" \
+        ZAP_FAIL_ERROR_LEVEL="${ZAP_FAIL_ERROR_LEVEL}" \
+        ZAP_MIN_RISK_LEVEL="${ZAP_MIN_RISK_LEVEL}" \
+        ZAP_MIN_CONFIDENCE="${ZAP_MIN_CONFIDENCE}" \
+        ZAP_REPORT_FORMATS="${ZAP_REPORT_FORMATS}" \
+        python3 "${repo_dir}/ci/scripts/build-plan.py"
+        chmod 600 "${plan_path}"
+      }
 
-      for url in "${URLS[@]}"; do
-        host=$(echo "$url" | sed -E 's#https?://##;s#/.*##')
-        HTML_OUT="/zap/wrk/${TARGET_CONTEXT}-${host}.html"
-        JSON_OUT="/zap/wrk/${TARGET_CONTEXT}-${host}.json"
-        XML_OUT="/zap/wrk/${TARGET_CONTEXT}-${host}.xml"
+      # ── Execute scans ────────────────────────────────────
+      while IFS= read -r target_json; do
+        scanned_any="true"
 
-        echo "→ Scanning $url"
+        name="$(jq -r '.name' <<<"${target_json}")"
+        url="$(jq -r '.url' <<<"${target_json}")"
+        auth_mode="$(jq -r '.auth_mode // "unauthenticated"' <<<"${target_json}")"
+        auth_profile="$(jq -r '.auth_profile // ""' <<<"${target_json}")"
 
-        # Build auth args only if all credentials present
-        AUTH_ARGS=()
-        if [[ -n "$CLIENT_ID" && -n "$CLIENT_SECRET" && -n "$TOKEN_URI" ]]; then
-          AUTH_ARGS+=( -t "${CLIENT_ID}:${CLIENT_SECRET}:${TOKEN_URI}" )
-        else
-          echo "Warning: missing credentials for context '$TARGET_CONTEXT'; proceeding without auth."
+        target_dir="${work_root}/${name}"
+        mkdir -p "${target_dir}"
+
+        plan_file="${target_dir}/automation-plan.yaml"
+        metadata_file="${target_dir}/scan-metadata.json"
+        runtime_target_json="${target_json}"
+
+        # Handle authentication
+        case "${auth_mode}" in
+          bearer)
+            if [[ -z "${auth_profile}" ]]; then
+              echo "Target '${name}' requires bearer auth but auth_profile is empty" >&2
+              exit 1
+            fi
+            bearer_token="$(fetch_bearer_token "${auth_profile}")"
+            runtime_target_json="$(jq --arg token "${bearer_token}" '. + {"_runtime_bearer_token": $token}' <<<"${runtime_target_json}")"
+            ;;
+          unauthenticated|header)
+            ;;
+          *)
+            echo "Unsupported auth_mode '${auth_mode}' for target '${name}'" >&2
+            exit 1
+            ;;
+        esac
+
+        echo "Building ZAP plan for ${name} (${url})"
+        build_plan "${runtime_target_json}" "${plan_file}" "${target_dir}"
+
+        # Write metadata
+        jq \
+          --arg started_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+          --arg scan_variant "${TARGET_SCAN_VARIANT}" \
+          --arg scan_key "${scan_key}" \
+          '{name, service_name, context, scan_variant: $scan_variant, scan_key: $scan_key,
+            url, auth_mode, auth_profile, include_paths, exclude_paths, scan,
+            report_to_defectdojo, defectdojo, started_at_utc: $started_at}' \
+          <<<"${target_json}" > "${metadata_file}"
+
+        # Execute ZAP — scrub bearer tokens from output to prevent log leakage
+        set +e
+        /zap/zap.sh -cmd -silent -autorun "${plan_file}" 2>&1 \
+          | sed 's/Bearer [A-Za-z0-9._+/=\-]*/Bearer **REDACTED**/g'
+        zap_exit_code=${PIPESTATUS[0]}
+        set -e
+
+        # Update metadata with results
+        jq \
+          --arg finished_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+          --argjson exit_code "${zap_exit_code}" \
+          '. + {finished_at_utc: $finished_at, zap_exit_code: $exit_code,
+            html_report: (.name + ".html"), json_report: (.name + ".json"),
+            xml_report: (.name + ".xml"), sarif_report: (.name + ".sarif.json")}' \
+          "${metadata_file}" > "${metadata_file}.tmp"
+        mv "${metadata_file}.tmp" "${metadata_file}"
+
+        # Clean up plan (may contain secrets)
+        rm -f "${plan_file}"
+
+        if [[ "${zap_exit_code}" -ne 0 ]]; then
+          echo "ZAP returned exit code ${zap_exit_code} for ${name}"
+          if [[ "${ZAP_ENFORCE_FAILURE}" == "true" ]]; then
+            overall_failure="true"
+          fi
         fi
 
-        /zap/zap-baseline.py \
-          -t "$url" \
-          -c zap-config/zap.yaml \
-          -r "$HTML_OUT" \
-          -J "$JSON_OUT" \
-          -x "$XML_OUT" \
-          "${AUTH_ARGS[@]}"
+        echo "Finished ${name}"
+      done < "${state_root}/targets.jsonl"
 
-        echo "  Reports: $HTML_OUT, $JSON_OUT, $XML_OUT"
-      done
+      # ── Summary ──────────────────────────────────────────
+      python3 "${repo_dir}/ci/scripts/build-summary.py" \
+        "${work_root}" "${state_root}/context-summary.json" \
+        "${TARGET_CONTEXT}" "${TARGET_SCAN_VARIANT}" "${scan_key}"
 
-      echo "Context '$TARGET_CONTEXT' scans complete."
+      if [[ "${scanned_any}" != "true" ]]; then
+        echo "No enabled targets found for scan key '${scan_key}'"
+        exit 0
+      fi
+
+      if [[ "${overall_failure}" == "true" ]]; then
+        echo "One or more scans returned non-zero and ZAP_ENFORCE_FAILURE=true" >&2
+        exit 1
+      fi
+
+      echo "Completed scan key '${scan_key}'"

@@ -1,55 +1,24 @@
 ---
-jobs:
-  - name: set-self
-    plan:
-      - get: zap-runner
-        trigger: true
+# ZAP Security Scanner Pipeline for Cloud.gov Concourse
+#
+# Aligned with cloud-gov common-pipelines patterns:
+#   - ECR-hosted resource types (registry-image, git, time)
+#   - ubuntu-hardened-stig base image via IMAGE_ARG_base_image
+#   - cloud-gov/oci-build-task for Docker builds
+#
+# Architecture:
+#   1. set-self: auto-configures pipeline from this file
+#   2. validate: YAML lint, Python syntax, script tests, target inventory
+#   3. scan-all-targets: matrix scan across contexts × variants
+#   4. import-to-defectdojo: upload results to DefectDojo
+#
+# Matrix dimensions:
+#   - target_context: internal, external, pages, development
+#   - scan_variant: authenticated, unauthenticated
+#
+# All secrets via CredHub interpolation: ((variable_name))
 
-      - set_pipeline: zap-scanner
-        file: zap-runner/ci/pipeline.yml
-        var_files:
-          - zap-runner/ci/config.yml
-
-  - name: scan-all-contexts
-    plan:
-      - get: zap-runner
-        trigger: true
-        passed:
-          - set-self
-
-      - across:
-          - var: context
-            values:
-              - "internal"
-              - "external"
-              - "pages"
-              - "unauthenticated"
-            max_in_flight: all
-        fail_fast: false
-        do:
-          - task: zap-scan
-            file: zap-runner/ci/tasks/zap-scan.yml
-            vars:
-              repo_name: ((repo_name))
-              runner_tag: ((runner_tag))
-            params:
-              TARGET_CONTEXT: ((.:context))
-              CREDHB_CRED: ((credentials))
-
-groups:
-  - name: default
-    jobs:
-      - set-self
-      - scan-all-contexts
-
-resources:
-  - name: zap-runner
-    type: git
-    source:
-      uri: https://github.com/cloud-gov/((repo_name))
-      branch: main
-      commit_verification_keys: ((cloud-gov-pgp-keys))
-
+# ── Resource Types (cloud-gov ECR) ────────────────────────
 resource_types:
   - name: registry-image
     type: registry-image
@@ -77,3 +46,407 @@ resource_types:
       repository: time-resource
       aws_region: us-gov-west-1
       tag: latest
+
+# ── Resources ─────────────────────────────────────────────
+resources:
+  - name: zap-runner
+    type: git
+    source:
+      uri: ((pipeline_repo_uri))
+      branch: ((pipeline_repo_branch))
+      commit_verification_keys: ((cloud-gov-pgp-keys))
+
+  - name: zap-runner-image
+    type: registry-image
+    source:
+      aws_access_key_id: ((ecr_aws_key))
+      aws_secret_access_key: ((ecr_aws_secret))
+      repository: zap-runner
+      aws_region: us-gov-west-1
+      tag: latest
+
+  - name: scan-schedule
+    type: time
+    source:
+      interval: ((scan_schedule_interval))
+
+# ── Jobs ──────────────────────────────────────────────────
+jobs:
+  # ── Self-Setting Pipeline ────────────────────────────────
+  - name: set-self
+    serial: true
+    plan:
+      - get: zap-runner
+        trigger: true
+
+      - set_pipeline: zap-scanner
+        file: zap-runner/ci/pipeline.yml
+        var_files:
+          - zap-runner/ci/config.yml
+
+  # ── Validate Pipeline Config ─────────────────────────────
+  - name: validate
+    serial: true
+    plan:
+      - in_parallel:
+          - get: zap-runner
+            trigger: true
+            passed: [set-self]
+          - get: zap-runner-image
+
+      - task: validate-config
+        image: zap-runner-image
+        config:
+          platform: linux
+          inputs:
+            - name: zap-runner
+          run:
+            path: bash
+            args:
+              - -ceu
+              - |
+                set -o pipefail
+                repo="zap-runner"
+                echo "=== Validate: Pipeline Configuration ==="
+
+                # 1. YAML syntax
+                echo "--- YAML validation ---"
+                python3 -c "
+                import yaml, sys, os
+                errors = 0
+                for f in ['ci/config.yml', 'ci/zap-config/targets.yml']:
+                    path = os.path.join('${repo}', f)
+                    try:
+                        with open(path) as fh:
+                            yaml.safe_load(fh)
+                        print(f'  {f}: OK')
+                    except yaml.YAMLError as e:
+                        print(f'  {f}: FAIL — {e}')
+                        errors += 1
+                sys.exit(1 if errors else 0)
+                "
+
+                # 2. Python syntax
+                echo "--- Python syntax ---"
+                for f in "${repo}"/ci/scripts/*.py; do
+                  python3 -m py_compile "$f" && echo "  $(basename $f): OK"
+                done
+
+                # 3. Target inventory
+                echo "--- Target inventory ---"
+                python3 "${repo}/ci/scripts/list-contexts.py" "${repo}/ci/zap-config/targets.yml"
+
+                # 4. parse-targets per context
+                echo "--- parse-targets.py ---"
+                for ctx in internal external pages development; do
+                  count=$(python3 "${repo}/ci/scripts/parse-targets.py" \
+                    "${repo}/ci/zap-config/targets.yml" "${ctx}" authenticated 2>/dev/null | wc -l)
+                  echo "  ${ctx}/authenticated: ${count} target(s)"
+                done
+
+                # 5. build-plan structure
+                echo "--- build-plan.py ---"
+                TARGET_JSON='{"name":"test","url":"http://localhost","auth_mode":"unauthenticated","scan":{}}' \
+                PLAN_PATH="/tmp/plan.yaml" REPORT_DIR="/tmp" \
+                python3 "${repo}/ci/scripts/build-plan.py"
+                python3 -c "
+                import yaml
+                with open('/tmp/plan.yaml') as f:
+                    plan = yaml.safe_load(f)
+                types = [j['type'] for j in plan['jobs']]
+                assert 'spider' in types and 'report' in types
+                print(f'  Plan: {len(plan[\"jobs\"])} jobs OK')
+                "
+
+                # 6. Bearer auth replacer
+                echo "--- bearer auth plan ---"
+                TARGET_JSON='{"name":"auth","url":"http://localhost","auth_mode":"bearer","_runtime_bearer_token":"tok","scan":{}}' \
+                PLAN_PATH="/tmp/bearer.yaml" REPORT_DIR="/tmp" \
+                python3 "${repo}/ci/scripts/build-plan.py"
+                python3 -c "
+                import yaml
+                with open('/tmp/bearer.yaml') as f:
+                    plan = yaml.safe_load(f)
+                r = [j for j in plan['jobs'] if j['type'] == 'replacer']
+                assert len(r) == 1 and 'replacementString' in r[0]['rules'][0]
+                print('  Replacer structure: OK')
+                "
+
+                # 7. Static auth provider
+                echo "--- fetch-bearer-token.py ---"
+                token=$(AUTH_PROFILES_JSON='{"t":{"provider":"static","token":"abc"}}' \
+                  python3 "${repo}/ci/scripts/fetch-bearer-token.py" t)
+                test "${token}" = "abc" && echo "  Static provider: OK"
+
+                echo ""
+                echo "=== All validations PASSED ==="
+
+  # ── Quick Test: Single unauthenticated scan ──────────────
+  # Scans just cloud.gov (unauthenticated) for initial validation.
+  # Trigger manually: fly -t <target> trigger-job -j zap-scanner/quick-test -w
+  - name: quick-test
+    serial: true
+    plan:
+      - in_parallel:
+          - get: zap-runner
+            passed: [validate]
+          - get: zap-runner-image
+
+      - task: scan-cloud-gov-public
+        image: zap-runner-image
+        config:
+          platform: linux
+          inputs:
+            - name: zap-runner
+          outputs:
+            - name: zap-report
+              path: /tmp/zap-report
+          run:
+            path: bash
+            args:
+              - -ceu
+              - |
+                set -o pipefail
+                repo="zap-runner"
+                target_dir="/tmp/zap-report/cloud-gov-public"
+                mkdir -p "${target_dir}"
+
+                echo "=== Quick Test: cloud.gov (unauthenticated) ==="
+
+                # Build plan for cloud.gov public scan (light profile)
+                export TARGET_JSON='{"name":"cloud-gov-public","url":"https://cloud.gov","auth_mode":"unauthenticated","scan":{"minutes":5,"max_depth":2,"thread_count":1,"passive_wait_minutes":3},"include_paths":["^https://cloud\\.gov/.*"]}'
+                export PLAN_PATH="${target_dir}/plan.yaml"
+                export REPORT_DIR="${target_dir}"
+                export ZAP_SKIP_ACTIVE_SCAN="true"
+                export ZAP_REPORT_FORMATS="html,json,sarif"
+                python3 "${repo}/ci/scripts/build-plan.py"
+
+                echo "Plan generated: $(wc -c < "${target_dir}/plan.yaml") bytes"
+
+                # Run ZAP with token scrubbing
+                set +e
+                /zap/zap.sh -cmd -silent -autorun "${target_dir}/plan.yaml" 2>&1 \
+                  | sed 's/Bearer [A-Za-z0-9._+/=\-]*/Bearer **REDACTED**/g'
+                rc=${PIPESTATUS[0]}
+                set -e
+                echo "ZAP exit code: ${rc}"
+                rm -f "${target_dir}/plan.yaml"
+
+                # Validate reports
+                python3 "${repo}/ci/scripts/validate-reports.py" \
+                  /tmp/zap-report --expect-alerts
+
+                echo ""
+                echo "=== Quick test PASSED ==="
+
+  # ── Scan All Targets ─────────────────────────────────────
+  # Matrix: context (internal/external/pages/development) × variant (auth/unauth)
+  - name: scan-all-targets
+    serial: true
+    plan:
+      - in_parallel:
+          steps:
+            - get: zap-runner
+              trigger: true
+              passed: [validate]
+            - get: zap-runner-image
+            - get: scan-schedule
+              trigger: true
+
+      - across:
+          - var: target_context
+            values:
+              - internal
+              - external
+              - pages
+              - development
+            max_in_flight: all
+          - var: scan_variant
+            values:
+              - authenticated
+              - unauthenticated
+            max_in_flight: all
+        fail_fast: false
+        do:
+          - task: zap-scan
+            image: zap-runner-image
+            file: zap-runner/ci/tasks/zap-scan.yml
+            params:
+              TARGET_CONTEXT: ((.:target_context))
+              TARGET_SCAN_VARIANT: ((.:scan_variant))
+              AUTH_PROFILES_JSON: ((auth_profiles_json))
+              ZAP_ENFORCE_FAILURE: ((zap_enforce_failure))
+              ZAP_MINUTES: ((zap_minutes))
+              ZAP_MAX_DEPTH: ((zap_max_depth))
+              ZAP_THREAD_COUNT: ((zap_thread_count))
+              ZAP_PASSIVE_WAIT_MINUTES: ((zap_passive_wait_minutes))
+              ZAP_FAIL_WARN_LEVEL: ((zap_fail_warn_level))
+              ZAP_FAIL_ERROR_LEVEL: ((zap_fail_error_level))
+              ZAP_MIN_RISK_LEVEL: ((zap_min_risk_level))
+              ZAP_MIN_CONFIDENCE: ((zap_min_confidence))
+              ZAP_REPORT_FORMATS: ((zap_report_formats))
+
+          - task: upload-to-s3
+            image: zap-runner-image
+            file: zap-runner/ci/tasks/upload-to-s3.yml
+            params:
+              TARGET_CONTEXT: ((.:target_context))
+              TARGET_SCAN_VARIANT: ((.:scan_variant))
+              AWS_DEFAULT_REGION: ((aws_region))
+              S3_UPLOAD_ENABLED: ((s3_upload_enabled))
+              S3_BUCKET: ((s3_bucket))
+              S3_PREFIX: ((s3_prefix))
+
+  # ── Import to DefectDojo ─────────────────────────────────
+  - name: import-to-defectdojo
+    serial: true
+    plan:
+      - in_parallel:
+          steps:
+            - get: zap-runner
+              trigger: false
+              passed: [scan-all-targets]
+            - get: zap-runner-image
+            - get: scan-schedule
+              trigger: true
+              passed: [scan-all-targets]
+
+      - across:
+          - var: target_context
+            values:
+              - internal
+              - external
+              - pages
+              - development
+            max_in_flight: all
+          - var: scan_variant
+            values:
+              - authenticated
+              - unauthenticated
+            max_in_flight: all
+        fail_fast: false
+        do:
+          - task: defectdojo-import
+            image: zap-runner-image
+            file: zap-runner/ci/tasks/defectdojo-import.yml
+            params:
+              TARGET_CONTEXT: ((.:target_context))
+              TARGET_SCAN_VARIANT: ((.:scan_variant))
+              AWS_DEFAULT_REGION: ((aws_region))
+              S3_BUCKET: ((s3_bucket))
+              S3_PREFIX: ((s3_prefix))
+              DEFECTDOJO_ENABLED: ((defectdojo_enabled))
+              DEFECTDOJO_URL: ((defectdojo_url))
+              DEFECTDOJO_API_KEY: ((defectdojo_api_key))
+              DEFECTDOJO_VERIFY_SSL: ((defectdojo_verify_ssl))
+              DEFECTDOJO_SCAN_TYPE: ((defectdojo_scan_type))
+              DEFECTDOJO_MINIMUM_SEVERITY: ((defectdojo_minimum_severity))
+              DEFECTDOJO_ACTIVE: ((defectdojo_active))
+              DEFECTDOJO_VERIFIED: ((defectdojo_verified))
+              DEFECTDOJO_CLOSE_OLD_FINDINGS: ((defectdojo_close_old_findings))
+              DEFECTDOJO_AUTO_CREATE_CONTEXT: ((defectdojo_auto_create_context))
+
+  # ── Ad-hoc: Per-context scans (manual trigger only) ──────
+  # Use for assessor requests, targeted rescans, or initial validation.
+  # fly -t <target> trigger-job -j zap-scanner/scan-external -w
+  - name: scan-internal
+    serial: true
+    plan:
+      - in_parallel:
+          - get: zap-runner
+            passed: [validate]
+          - get: zap-runner-image
+      - task: zap-scan
+        image: zap-runner-image
+        file: zap-runner/ci/tasks/zap-scan.yml
+        params: &scan-task-params-base
+          AUTH_PROFILES_JSON: ((auth_profiles_json))
+          ZAP_ENFORCE_FAILURE: ((zap_enforce_failure))
+          ZAP_MINUTES: ((zap_minutes))
+          ZAP_MAX_DEPTH: ((zap_max_depth))
+          ZAP_THREAD_COUNT: ((zap_thread_count))
+          ZAP_PASSIVE_WAIT_MINUTES: ((zap_passive_wait_minutes))
+          ZAP_FAIL_WARN_LEVEL: ((zap_fail_warn_level))
+          ZAP_FAIL_ERROR_LEVEL: ((zap_fail_error_level))
+          ZAP_MIN_RISK_LEVEL: ((zap_min_risk_level))
+          ZAP_MIN_CONFIDENCE: ((zap_min_confidence))
+          ZAP_REPORT_FORMATS: ((zap_report_formats))
+          TARGET_CONTEXT: internal
+          TARGET_SCAN_VARIANT: authenticated
+
+  - name: scan-external
+    serial: true
+    plan:
+      - in_parallel:
+          - get: zap-runner
+            passed: [validate]
+          - get: zap-runner-image
+      - task: zap-scan
+        image: zap-runner-image
+        file: zap-runner/ci/tasks/zap-scan.yml
+        params:
+          <<: *scan-task-params-base
+          TARGET_CONTEXT: external
+          TARGET_SCAN_VARIANT: authenticated
+
+  - name: scan-pages
+    serial: true
+    plan:
+      - in_parallel:
+          - get: zap-runner
+            passed: [validate]
+          - get: zap-runner-image
+      - task: zap-scan
+        image: zap-runner-image
+        file: zap-runner/ci/tasks/zap-scan.yml
+        params:
+          <<: *scan-task-params-base
+          TARGET_CONTEXT: pages
+          TARGET_SCAN_VARIANT: authenticated
+
+  - name: scan-development
+    serial: true
+    plan:
+      - in_parallel:
+          - get: zap-runner
+            passed: [validate]
+          - get: zap-runner-image
+      - task: zap-scan
+        image: zap-runner-image
+        file: zap-runner/ci/tasks/zap-scan.yml
+        params:
+          <<: *scan-task-params-base
+          TARGET_CONTEXT: development
+          TARGET_SCAN_VARIANT: authenticated
+
+  - name: scan-external-unauth
+    serial: true
+    plan:
+      - in_parallel:
+          - get: zap-runner
+            passed: [validate]
+          - get: zap-runner-image
+      - task: zap-scan
+        image: zap-runner-image
+        file: zap-runner/ci/tasks/zap-scan.yml
+        params:
+          <<: *scan-task-params-base
+          TARGET_CONTEXT: external
+          TARGET_SCAN_VARIANT: unauthenticated
+
+groups:
+  - name: default
+    jobs:
+      - set-self
+      - validate
+      - quick-test
+      - scan-all-targets
+      - import-to-defectdojo
+  - name: ad-hoc
+    jobs:
+      - quick-test
+      - scan-internal
+      - scan-external
+      - scan-pages
+      - scan-development
+      - scan-external-unauth

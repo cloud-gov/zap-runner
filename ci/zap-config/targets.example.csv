@@ -1,0 +1,12 @@
+name,url,context,scan_variant,auth_mode,auth_profile,scan_type,include_paths
+# Public-facing apps (no authentication)
+juice-shop-public,https://demo.owasp-juice.shop,public,unauthenticated,unauthenticated,,web,
+my-public-app,https://app.example.com,public,unauthenticated,unauthenticated,,web,
+# Internal APIs
+httpbin-internal,https://httpbin.org,internal,unauthenticated,unauthenticated,,web,
+httpbin-api,https://httpbin.org,internal,unauthenticated,unauthenticated,,api,
+# Static sites
+company-website,https://example.com,static,unauthenticated,unauthenticated,,web,
+# Authenticated targets (requires auth profile in config.yml)
+# my-cf-app,https://app.cf.example.com,external,authenticated,bearer,production,web,
+# my-oidc-app,https://app.auth.example.com,external,authenticated,bearer,my-oidc-provider,web,
